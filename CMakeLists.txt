@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.20.0)
 project(toy)
 
+add_custom_target(Toy)
+
+macro(add_toy_chapter name)
+  add_dependencies(Toy ${name})
+  add_llvm_example(${name} ${ARGN})
+endmacro(add_toy_chapter name)
 set(CMAKE_CXX_STANDARD 17)
 
 find_package(LLVM REQUIRED CONFIG)
@@ -24,16 +30,6 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR}/include/)
 include_directories(${MLIR_INCLUDE_DIRS})
 
 add_subdirectory(include)
-
-set(LLVM_LINK_COMPONENTS Support Core)
-
-# Ops tablegen
-set(LLVM_TARGET_DEFINITIONS include/toy/Ops.td)
-mlir_tablegen(include/toy/Ops.h.inc -gen-op-decls -I${MLIR_INCLUDE_DIR})
-mlir_tablegen(include/toy/Ops.cpp.inc -gen-op-defs -I${MLIR_INCLUDE_DIR})
-mlir_tablegen(include/toy/Dialect.h.inc -gen-dialect-decls -I${MLIR_INCLUDE_DIR})
-mlir_tablegen(include/toy/Dialect.cpp.inc -gen-dialect-defs -I${MLIR_INCLUDE_DIR})
-add_public_tablegen_target(ToyOpsIncGen)
 unset(LLVM_TARGET_DEFINITIONS)
 
 # Combine tablegen

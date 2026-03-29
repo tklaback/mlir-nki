@@ -1,1 +1,6 @@
-# Tablegen targets are defined in the root CMakeLists.txt
+set(LLVM_TARGET_DEFINITIONS Ops.td)
+mlir_tablegen(Ops.h.inc -gen-op-decls -I${MLIR_INCLUDE_DIR})
+mlir_tablegen(Ops.cpp.inc -gen-op-defs -I${MLIR_INCLUDE_DIR})
+mlir_tablegen(Dialect.h.inc -gen-dialect-decls -I${MLIR_INCLUDE_DIR})
+mlir_tablegen(Dialect.cpp.inc -gen-dialect-defs -I${MLIR_INCLUDE_DIR})
+add_public_tablegen_target(ToyOpsIncGen)
