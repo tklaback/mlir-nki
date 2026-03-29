@@ -29,14 +29,14 @@ void NKIDialect::initialize() {
       >();
 }
 
-void ConstantOp::build(mlir::OpBuilder &builder, mlir::OperationState &state,
+void LoadOp::build(mlir::OpBuilder &builder, mlir::OperationState &state,
                        double value) {
   auto dataType = RankedTensorType::get({}, builder.getF64Type());
   auto dataAttribute = DenseElementsAttr::get(dataType, value);
-  ConstantOp::build(builder, state, dataType, dataAttribute);
+  LoadOp::build(builder, state, dataType, dataAttribute);
 }
 
-mlir::ParseResult ConstantOp::parse(mlir::OpAsmParser &parser,
+mlir::ParseResult LoadOp::parse(mlir::OpAsmParser &parser,
                                     mlir::OperationState &result) {
   mlir::DenseElementsAttr value;
   if (parser.parseOptionalAttrDict(result.attributes) ||
@@ -47,21 +47,17 @@ mlir::ParseResult ConstantOp::parse(mlir::OpAsmParser &parser,
   return success();
 }
 
-void ConstantOp::print(mlir::OpAsmPrinter &printer) {
+void LoadOp::print(mlir::OpAsmPrinter &printer) {
   printer << " ";
   printer.printOptionalAttrDict((*this)->getAttrs(), /*elidedAttrs=*/{"value"});
   printer << getValue();
 }
 
-llvm::LogicalResult ConstantOp::verify() {
-  // If the return type of the constant is not an unranked tensor, the shape
-  // must match the shape of the attribute holding the data.
+llvm::LogicalResult LoadOp::verify() {
   auto resultType = llvm::dyn_cast<mlir::RankedTensorType>(getResult().getType());
   if (!resultType)
     return success();
 
-  // Check that the rank of the attribute type matches the rank of the constant
-  // result type.
   auto attrType = llvm::cast<mlir::RankedTensorType>(getValue().getType());
   if (attrType.getRank() != resultType.getRank()) {
     return emitOpError("return type must match the one of the attached value "

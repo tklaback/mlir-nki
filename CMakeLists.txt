@@ -18,10 +18,16 @@ include(TableGen)
 include(AddLLVM)
 include(AddMLIR)
 
-include_directories(include)
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/include/)
 include_directories(${MLIR_INCLUDE_DIRS})
 
 add_subdirectory(include)
-unset(LLVM_TARGET_DEFINITIONS)
+
+add_library(NKITransforms
+  lib/Transforms/NKIToPython.cpp
+)
+
+add_dependencies(NKITransforms NKIOpsIncGen)
+
+target_include_directories(NKITransforms PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
