@@ -24,6 +24,17 @@ include_directories(${MLIR_INCLUDE_DIRS})
 
 add_subdirectory(include)
 
+add_mlir_library(NKIDialect
+  lib/Dialect.cpp
+
+  LINK_LIBS PUBLIC
+  MLIRIR
+)
+
+add_dependencies(NKIDialect NKIOpsIncGen)
+
+target_include_directories(NKIDialect PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
 add_library(NKITransforms
   lib/Transforms/NKIToPython.cpp
 )
@@ -31,3 +42,17 @@ add_library(NKITransforms
 add_dependencies(NKITransforms NKIOpsIncGen)
 
 target_include_directories(NKITransforms PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+add_executable(nki-opt
+  tools/nki-opt.cpp
+)
+
+add_dependencies(nki-opt NKIOpsIncGen)
+
+target_include_directories(nki-opt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+target_link_libraries(nki-opt PRIVATE
+  NKIDialect
+  MLIROptLib
+  MLIRSupport
+)
