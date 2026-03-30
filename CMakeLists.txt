@@ -54,5 +54,6 @@ target_include_directories(nki-opt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(nki-opt PRIVATE
   NKIDialect
   MLIROptLib
+  MLIRFuncDialect
   MLIRSupport
 )
