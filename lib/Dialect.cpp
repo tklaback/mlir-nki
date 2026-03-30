@@ -1,5 +1,5 @@
 
-#include "nki/Dialect.h"
+#include "nki/Transforms/Dialect.h"
 
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
@@ -20,14 +20,14 @@
 using namespace mlir;
 using namespace mlir::nki;
 
-#include "nki/Dialect.cpp.inc"
+#include "nki/Transforms/Dialect.cpp.inc"
 
 void NKIDialect::initialize() {
   addOperations<
 #define GET_OP_LIST
-#include "nki/Ops.cpp.inc"
+#include "nki/Transforms/Ops.cpp.inc"
       >();
 }
 
 #define GET_OP_CLASSES
-#include "nki/Ops.cpp.inc"
+#include "nki/Transforms/Ops.cpp.inc"

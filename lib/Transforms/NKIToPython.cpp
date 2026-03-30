@@ -1,7 +1,7 @@
 
 #include "mlir/Pass/Pass.h"
 #include "mlir/IR/BuiltinOps.h"
-#include "nki/Dialect.h"
+#include "nki/Transforms/Dialect.h"
 
 namespace nki {
 

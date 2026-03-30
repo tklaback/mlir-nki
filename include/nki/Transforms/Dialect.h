@@ -8,9 +8,9 @@
 #include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
-#include "nki/Dialect.h.inc"
+#include "nki/Transforms/Dialect.h.inc"
 
 #define GET_OP_CLASSES
-#include "nki/Ops.h.inc"
+#include "nki/Transforms/Ops.h.inc"
 
 #endif
