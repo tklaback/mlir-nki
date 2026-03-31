@@ -7,11 +7,24 @@ include "mlir/IR/DialectBase.td"
 def NKI_Dialect : Dialect {
   let name = "nki";
   let cppNamespace = "::mlir::nki";
-  let summary = "NKI dialect for learning MLIR";
+  let summary = "NKI Dialect for lowering to nki python";
   let description = [{
-    The NKI dialect provides a simple set of operations
-    for learning and understanding MLIR fundamentals.
+
   }];
+}
+
+class NKI_Op<string mnemonic, list<Trait> traits = []> :
+    Op<NKI_Dialect, mnemonic, traits>;
+
+def NKI_LoadOp : NKI_Op<"load"> {
+  let arguments = (ins AnyMemRef:$src);
+  let results = (outs AnyTensor:$result);
+  let assemblyFormat = "$src `:` type($src) `->` type($result) attr-dict";
+}
+
+def NKI_StoreOp : NKI_Op<"store"> {
+  let arguments = (ins AnyTensor:$src, AnyMemRef:$dst);
+  let assemblyFormat = "$src `,` $dst `:` type($src) `,` type($dst) attr-dict";
 }
 
 #endif
