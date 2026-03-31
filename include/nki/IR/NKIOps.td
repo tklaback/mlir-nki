@@ -9,6 +9,7 @@ include "mlir/Interfaces/SideEffectInterfaces.td"
 def NKI_Dialect : Dialect {
   let name = "nki";
   let cppNamespace = "::mlir::nki";
+  let summary = "NKI dialect";
 }
 
 class NKI_Op<string mnemonic, list<Trait> traits = []> :

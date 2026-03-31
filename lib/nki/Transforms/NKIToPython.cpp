@@ -1,6 +1,6 @@
-
 #include "mlir/Pass/Pass.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "nki/IR/NKIOps.h" 
 #include "nki/Transforms/Passes.h"
 
 namespace nki {
@@ -15,7 +15,7 @@ class NKIToPythonPass : public mlir::PassWrapper<NKIToPythonPass, mlir::Operatio
   }
 };
 
-std::unique_ptr<mlir::Pass> createNKIToPythonPass() {
+std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>> createNKIToPythonPass() {
   return std::make_unique<NKIToPythonPass>();
 }
 

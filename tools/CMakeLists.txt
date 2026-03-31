@@ -5,4 +5,5 @@ target_link_libraries(nki-opt PRIVATE
   NKITransforms
   MLIROptLib
   MLIRPass
+  MLIRFuncDialect
 )

@@ -1,5 +1,5 @@
 add_mlir_library(NKITransforms
-  NKIToPythonPass.cpp
+  NKIToPython.cpp
 
   DEPENDS
     NKIPassesIncGen
