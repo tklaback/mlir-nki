@@ -1,16 +1,9 @@
 #ifndef NKI_OPS
 #define NKI_OPS
 
+include "nki/IR/NKIDialect.td"
 include "mlir/IR/OpBase.td"
-include "mlir/Interfaces/FunctionInterfaces.td"
-include "mlir/IR/SymbolInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
-
-def NKI_Dialect : Dialect {
-  let name = "nki";
-  let cppNamespace = "::mlir::nki";
-  let summary = "NKI dialect";
-}
 
 class NKI_Op<string mnemonic, list<Trait> traits = []> :
     Op<NKI_Dialect, mnemonic, traits>;
@@ -26,4 +19,4 @@ def NKI_StoreOp : NKI_Op<"store"> {
   let assemblyFormat = "$src `,` $dst `:` type($src) `,` type($dst) attr-dict";
 }
 
-#endif
+#endif // NKI_OPS
