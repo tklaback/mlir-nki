@@ -25,7 +25,7 @@ include_directories(${MLIR_INCLUDE_DIRS})
 add_subdirectory(include)
 
 add_mlir_library(NKIDialect
-  lib/Dialect.cpp
+  lib/IR/NKIOps.cpp
 
   LINK_LIBS PUBLIC
   MLIRIR

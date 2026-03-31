@@ -1,6 +1,6 @@
 #include "mlir/Tools/mlir-opt/MlirOptMain.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "nki/Transforms/Dialect.h"
+#include "nki/IR/NKIOps.h"
 
 int main(int argc, char **argv) {
   mlir::DialectRegistry registry;
