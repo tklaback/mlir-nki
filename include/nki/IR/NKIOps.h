@@ -4,6 +4,6 @@
 #include "mlir/IR/Dialect.h"
 
 #define GET_DIALECT_DEFS
-#include "nki/IR/NKIDialect.h.inc"
+#include "nki/IR/NKIOps.h.inc"
 
 #endif // NKI_DIALECT_H

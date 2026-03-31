@@ -1,5 +1,5 @@
 add_mlir_library(NKIIR
-  NKIDialect.cpp
+  NKIOps.cpp
 
   DEPENDS
     NKIIRIncGen
