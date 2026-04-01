@@ -7,11 +7,8 @@
 
 namespace mlir::nki {
 
-#define GEN_PASS_DECLS
+#define GEN_PASS_DECL
 #include "nki/Transforms/Passes.h.inc"
-
-
-std::unique_ptr<Pass> createNKIToPythonPass();
 
 #define GEN_PASS_REGISTRATION
 #include "nki/Transforms/Passes.h.inc"
