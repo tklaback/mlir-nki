@@ -27,19 +27,18 @@ def NKI_StoreOp : NKI_Op<"store"> {
   let assemblyFormat = "$src `,` $dst `:` type($src) `,` type($dst) attr-dict";
 }
 
-def NKI_LaunchOp : NKI_Op<"launch"> {
+def NKI_LaunchOp : NKI_Op<"launch", [SingleBlock, NoTerminator]> {
   let arguments = (ins
-    FlatSymbolRefAttr:$callee,
-    Variadic<AnyType>:$args,
     Index:$grid_x,
     Index:$grid_y
   );
   let results = (outs);
 
-  // nki.launch @kernel(%arg0, %arg1) grid [%nc_x, %nc_y] : (memref<1024xf32>, memref<1024xf32>) -> ()
+  let regions = (region SizedRegion<1>:$body);
+
   let assemblyFormat = [{
-    $callee `(` $args `)` `grid` `[` $grid_x `,` $grid_y `]`
-    attr-dict `:` functional-type($args, results)
+    `grid` `[` $grid_x `,` $grid_y `]`
+    $body attr-dict
   }];
 }
 
