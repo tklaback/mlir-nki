@@ -10,7 +10,6 @@ namespace mlir::nki {
 struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
   void runOnOperation() override {
     mlir::ModuleOp module = getOperation();
-    // Add your transformation logic here
   }
 };
 

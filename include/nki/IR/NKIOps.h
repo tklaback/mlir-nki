@@ -6,6 +6,7 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpImplementation.h"
+#include "mlir/Bytecode/BytecodeOpInterface.h"
 
 #include "nki/IR/NKIOpsDialect.h.inc"
 
