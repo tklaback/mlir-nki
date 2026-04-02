@@ -6,7 +6,10 @@ add_mlir_dialect_library(NKITransforms
   NKITransformsIncGen
 
   LINK_LIBS PUBLIC
+  AIRDialect
   MLIRFuncDialect
+  MLIRArithDialect
+  MLIRAffineDialect
   MLIRIR
   MLIRPass
   MLIRTransforms

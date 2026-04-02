@@ -43,3 +43,16 @@ def herd2_kernel(args):
 herd1_kernel[8, 8](args)    # 4×2, 4×2
 herd2_kernel[12, 12](args)  # 4×3, 4×3
 ```
+
+## Additional Notes
+
+```sh
+cmake .. \
+  -DAIR_DIR=/home/ty/code/mlir-air/my_install/lib/cmake/air \
+  -DAIR_BUILD_DIR=/home/ty/code/mlir-air/build \
+  -DMLIR_DIR=/home/ty/code/mlir-air/my_install/mlir/lib/cmake/mlir \
+  -DLLVM_DIR=/home/ty/code/mlir-air/my_install/mlir/lib/cmake/llvm \
+  -G Ninja
+```
+
+`-DMLIR_DIR` and `-DLLVM_DIR` are required because `libAIRDialect.a` was built against LLVM 22 (bundled with mlir-air), while the system MLIR at `/usr/local` is LLVM 23. Pointing cmake at the mlir-air bundled install ensures all components share the same ABI.
