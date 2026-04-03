@@ -26,7 +26,11 @@ struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
     auto nkiLaunch = nki::LaunchOp::create(rewriter, launch.getLoc(), sizes[0], sizes[1]);
 
     // Move the body block into nki.launch's region.
+    // getBody() returns a Region&, which is a list of blocks.
+    // front() dereferences the first element of that list.
+    // emplaceBlock() constructs a new block directly in the list.
     Block *airBlock = &launch.getBody().front();
+    nkiLaunch.getBody().emplaceBlock();
     Block *nkiBlock = &nkiLaunch.getBody().front();
 
     // Replace ID block args (induction variables) with the sizes themselves as
@@ -35,7 +39,7 @@ struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
     ArrayRef<BlockArgument> sizeArgs = launch.getSize();
     for (auto [idArg, sizeArg, sizeVal] :
          llvm::zip(ids, sizeArgs, sizes)) {
-      Value(idArg).replaceAllUsesWith(sizeVal); // placeholder
+      Value(idArg).replaceAllUsesWith(sizeVal);
       Value(sizeArg).replaceAllUsesWith(sizeVal);
     }
 
@@ -65,8 +69,12 @@ struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
 struct ConvertAIRToNKIPass
     : public impl::ConvertAIRToNKIPassBase<ConvertAIRToNKIPass> {
   void runOnOperation() override {
+
     RewritePatternSet patterns(&getContext());
+
     patterns.add<ConvertAIRLaunch>(&getContext());
+
+    // check for failure
     if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
       signalPassFailure();
   }

@@ -17,7 +17,8 @@ def ConvertAIRToNKIPass : Pass<"convert-air-to-nki", "mlir::ModuleOp"> {
   }];
   let dependentDialects = [
     "mlir::arith::ArithDialect",
-    "mlir::affine::AffineDialect"
+    "mlir::affine::AffineDialect",
+    "mlir::nki::NKIDialect"
   ];
 }
 
