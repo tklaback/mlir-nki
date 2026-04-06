@@ -6,6 +6,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include <iostream>
 
 namespace mlir::nki {
 
@@ -32,6 +33,24 @@ struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
     Block *airBlock = &launch.getBody().front();
     nkiLaunch.getBody().emplaceBlock();
     Block *nkiBlock = &nkiLaunch.getBody().front();
+
+    // walk the segment body
+    launch.walk([](xilinx::air::SegmentOp seg) {
+      // replace all occurrences of segments' arguments
+      // with the operand that were assigned to them.
+      for (auto [arg, operand] : llvm::zip(seg.getKernelArguments(), seg.getKernelOperands()))
+        Value(arg).replaceAllUsesWith(operand);
+
+      // erase all block arguments (the segment-local args ---
+      //  they've already been replaced with the operands)
+      Block *segBlock = &seg.getBody().front();
+      segBlock->eraseArguments([](BlockArgument) {return true; });
+      //  erase the last op in the block (segment_terminator)
+      segBlock->back().erase();
+
+      seg->getBlock()->getOperations().splice(seg->getIterator(), segBlock->getOperations());
+      seg.erase();
+    });
 
     // Replace ID block args (induction variables) with the sizes themselves as
     // a placeholder — real program_id lowering comes later.
