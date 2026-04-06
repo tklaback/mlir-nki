@@ -3,6 +3,7 @@
 #include "air/Dialect/AIR/AIRDialect.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "nki/Transforms/Passes.h"
 #include "nki/IR/NKIOps.h"
 
@@ -13,7 +14,8 @@ int main(int argc, char **argv) {
     xilinx::air::airDialect,
     mlir::affine::AffineDialect,
     mlir::nki::NKIDialect, 
-    mlir::func::FuncDialect
+    mlir::func::FuncDialect,
+    mlir::memref::MemRefDialect
   >();
 
   mlir::nki::registerNKIPasses();

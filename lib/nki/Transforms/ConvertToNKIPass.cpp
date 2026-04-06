@@ -24,16 +24,6 @@ struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
     if (sizes.size() != 2)
       return rewriter.notifyMatchFailure(launch, "expected 2D launch");
 
-    auto nkiLaunch = nki::LaunchOp::create(rewriter, launch.getLoc(), sizes[0], sizes[1]);
-
-    // Move the body block into nki.launch's region.
-    // getBody() returns a Region&, which is a list of blocks.
-    // front() dereferences the first element of that list.
-    // emplaceBlock() constructs a new block directly in the list.
-    Block *airBlock = &launch.getBody().front();
-    nkiLaunch.getBody().emplaceBlock();
-    Block *nkiBlock = &nkiLaunch.getBody().front();
-
     // walk the segment body
     launch.walk([](xilinx::air::SegmentOp seg) {
       // replace all occurrences of segments' arguments
@@ -51,6 +41,44 @@ struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
       seg->getBlock()->getOperations().splice(seg->getIterator(), segBlock->getOperations());
       seg.erase();
     });
+
+    Value herdSizeX, herdSizeY;
+    launch.walk([&](xilinx::air::HerdOp herd) {
+      OperandRange herdSizes = herd.getSizeOperands();
+      herdSizeX = herdSizes[0];
+      herdSizeY = herdSizes[1];
+      // Replace ID args and size args (just use size values as placeholder)
+      for (auto [idArg, sizeArg, sizeVal] :
+        llvm::zip(herd.getIds(), herd.getSize(), herd.getSizeOperands())) {
+        Value(idArg).replaceAllUsesWith(sizeVal);
+        Value(sizeArg).replaceAllUsesWith(sizeVal);
+      }
+
+      Block *herdBlock = &herd.getBody().front();
+      herdBlock->eraseArguments([](BlockArgument) {return true; });
+      //  erase the last op in the block (segment_terminator)
+      herdBlock->back().erase();
+
+      herd->getBlock()->getOperations().splice(herd->getIterator(), herdBlock->getOperations());
+      herd.erase();
+    });
+
+    // Flatten the launch with the herd
+    // Compute products
+    Value gridX = arith::MulIOp::create(rewriter, launch.getLoc(), sizes[0], herdSizeX);
+    Value gridY = arith::MulIOp::create(rewriter, launch.getLoc(), sizes[1], herdSizeY);
+
+
+    // Use products for nki.launch
+    auto nkiLaunch = nki::LaunchOp::create(rewriter, launch.getLoc(), gridX, gridY);
+
+    // Move the body block into nki.launch's region.
+    // getBody() returns a Region&, which is a list of blocks.
+    // front() dereferences the first element of that list.
+    // emplaceBlock() constructs a new block directly in the list.
+    Block *airBlock = &launch.getBody().front();
+    nkiLaunch.getBody().emplaceBlock();
+    Block *nkiBlock = &nkiLaunch.getBody().front();
 
     // Replace ID block args (induction variables) with the sizes themselves as
     // a placeholder — real program_id lowering comes later.
