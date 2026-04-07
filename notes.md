@@ -56,3 +56,9 @@ cmake .. \
 ```
 
 `-DMLIR_DIR` and `-DLLVM_DIR` are required because `libAIRDialect.a` was built against LLVM 22 (bundled with mlir-air), while the system MLIR at `/usr/local` is LLVM 23. Pointing cmake at the mlir-air bundled install ensures all components share the same ABI.
+
+Then, run `ninja` while in the build dir.
+
+Then, to run a test from the build dir:
+
+./tools/nki-opt --convert-air-to-nki (or whatever lowering(s)) ../test/nki/simple_add.mlir (or whichever test)
