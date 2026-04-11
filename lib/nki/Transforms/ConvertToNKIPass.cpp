@@ -58,62 +58,71 @@ struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
       herds.push_back(herd);
     });
 
-    for (int i = 0; i < herds.size(); i++) {
-      xilinx::air::HerdOp curHerd = herds[i];
-      OperandRange herdLaunchSizes = curHerd.getSizeOperands();
-      // herdLaunchSizes are defined inside the launch body. Clone their defining
-      // ops to before the launch so gridX/gridY live in the outer scope.
-      rewriter.setInsertionPoint(launch);
-      IRMapping sizeMapping;
-      Value herdSizeX = rewriter.clone(*herdLaunchSizes[0].getDefiningOp(), sizeMapping)->getResult(0);
-      Value herdSizeY = rewriter.clone(*herdLaunchSizes[1].getDefiningOp(), sizeMapping)->getResult(0);
-      Value gridX = arith::MulIOp::create(rewriter, launch.getLoc(), herdSizeX, launchSizes[0]);
-      Value gridY = arith::MulIOp::create(rewriter, launch.getLoc(), herdSizeY, launchSizes[1]);
-
-      auto nkiLaunch = nki::LaunchOp::create(rewriter, launch.getLoc(), gridX, gridY);
-
-      // Each NKI launch should contain air.launches contents outside of the herds, but, then each nki launch's rest of its body will be the herd it is associated with.
-
+    rewriter.setInsertionPoint(launch);
+    if (herds.size() == 0) {
+      auto nkiLaunch = nki::LaunchOp::create(rewriter, launch.getLoc(), launchSizes[0], launchSizes[1]);
       nkiLaunch.getBody().emplaceBlock();
       Block *nkiBlock = &nkiLaunch.getBody().front();
+      launchBlock->back().erase(); // erase launch terminator
+      nkiBlock->getOperations().splice(nkiBlock->end(), launchBlock->getOperations());
+    }
+    else {
+      for (int i = 0; i < herds.size(); i++) {
+        xilinx::air::HerdOp curHerd = herds[i];
+        OperandRange herdLaunchSizes = curHerd.getSizeOperands();
+        // herdLaunchSizes are defined inside the launch body. Clone their defining
+        // ops to before the launch so gridX/gridY live in the outer scope.
+        IRMapping sizeMapping;
+        Value herdSizeX = rewriter.clone(*herdLaunchSizes[0].getDefiningOp(), sizeMapping)->getResult(0);
+        Value herdSizeY = rewriter.clone(*herdLaunchSizes[1].getDefiningOp(), sizeMapping)->getResult(0);
+        Value gridX = arith::MulIOp::create(rewriter, launch.getLoc(), herdSizeX, launchSizes[0]);
+        Value gridY = arith::MulIOp::create(rewriter, launch.getLoc(), herdSizeY, launchSizes[1]);
 
-      // Clone non-herd ops from the launch body into nki.launch
-      // IRMapping tracks value substitutions so cloned ops reference each other correctly.
-      IRMapping mapping;
-      rewriter.setInsertionPointToEnd(nkiBlock);
-      for (Operation &op : *launchBlock) {
-        if (isa<xilinx::air::HerdOp>(op) || op.hasTrait<OpTrait::IsTerminator>())
-          continue;
+        auto nkiLaunch = nki::LaunchOp::create(rewriter, launch.getLoc(), gridX, gridY);
 
-        rewriter.clone(op, mapping);
+        // Each NKI launch should contain air.launches contents outside of the herds, but, then each nki launch's rest of its body will be the herd it is associated with.
+
+        nkiLaunch.getBody().emplaceBlock();
+        Block *nkiBlock = &nkiLaunch.getBody().front();
+
+        // Clone non-herd ops from the launch body into nki.launch
+        // IRMapping tracks value substitutions so cloned ops reference each other correctly.
+        IRMapping mapping;
+        rewriter.setInsertionPointToEnd(nkiBlock);
+        for (Operation &op : *launchBlock) {
+          if (isa<xilinx::air::HerdOp>(op) || op.hasTrait<OpTrait::IsTerminator>())
+            continue;
+
+          rewriter.clone(op, mapping);
+        }
+
+        for (auto [idArg, sizeArg, sizeVal] :
+            llvm::zip(curHerd.getIds(), curHerd.getSize(), curHerd.getSizeOperands()))  {
+          Value(idArg).replaceAllUsesWith(sizeVal);  // placeholder: use size as stand-in
+          Value(sizeArg).replaceAllUsesWith(sizeVal);
+        }
+
+        for (auto [kernelArg, operand] :
+          llvm::zip(curHerd.getKernelArguments(), curHerd.getKernelOperands()))
+          Value(kernelArg).replaceAllUsesWith(operand);
+
+        Block *herdBlock = &curHerd.getBody().front();
+
+        herdBlock->eraseArguments([](BlockArgument) { return true; });
+
+        // Remap herd body operands to point to cloned copies instead of originals.
+        herdBlock->walk([&](Operation *op) {
+          for (OpOperand &operand : op->getOpOperands())
+            if (Value mapped = mapping.lookupOrNull(operand.get()))
+              operand.set(mapped);
+        });
+
+        herdBlock->back().erase();
+
+        nkiBlock->getOperations().splice(nkiBlock->end(), herdBlock->getOperations());
+        curHerd->erase();
+
       }
-
-      for (auto [idArg, sizeArg, sizeVal] :
-          llvm::zip(curHerd.getIds(), curHerd.getSize(), curHerd.getSizeOperands()))  {
-        Value(idArg).replaceAllUsesWith(sizeVal);  // placeholder: use size as stand-in
-        Value(sizeArg).replaceAllUsesWith(sizeVal);
-      }
-
-      for (auto [kernelArg, operand] :
-         llvm::zip(curHerd.getKernelArguments(), curHerd.getKernelOperands()))
-        Value(kernelArg).replaceAllUsesWith(operand);
-
-      Block *herdBlock = &curHerd.getBody().front();
-
-      herdBlock->eraseArguments([](BlockArgument) { return true; });
-
-      // Remap herd body operands to point to cloned copies instead of originals.
-      herdBlock->walk([&](Operation *op) {
-        for (OpOperand &operand : op->getOpOperands())
-          if (Value mapped = mapping.lookupOrNull(operand.get()))
-            operand.set(mapped);
-      });
-
-      herdBlock->back().erase();
-
-      nkiBlock->getOperations().splice(nkiBlock->end(), herdBlock->getOperations());
-      curHerd->erase();
-
     }
 
     rewriter.eraseOp(launch);
