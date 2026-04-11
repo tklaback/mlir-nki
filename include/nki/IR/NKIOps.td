@@ -17,15 +17,23 @@ class NKI_Op<string mnemonic, list<Trait> traits = []> :
     Op<NKI_Dialect, mnemonic, traits>;
 
 def NKI_LoadOp : NKI_Op<"load"> {
-  let arguments = (ins AnyMemRef:$src);
-  let results = (outs AnyTensor:$result);
-  let assemblyFormat = "$src `:` type($src) `->` type($result) attr-dict";
+  let arguments = (ins
+    AnyMemRef:$src,
+    Variadic<Index>:$indices  // flat list of index values for the tile
+  );
+  let results = (outs AnyMemRef:$result);  // result is SBUF memref, not tensor
+  let assemblyFormat = "$src `[` $indices `]` `:` type($src) `->` type($result) attr-dict";
 }
 
 def NKI_StoreOp : NKI_Op<"store"> {
-  let arguments = (ins AnyTensor:$src, AnyMemRef:$dst);
-  let assemblyFormat = "$src `,` $dst `:` type($src) `,` type($dst) attr-dict";
+  let arguments = (ins
+    AnyMemRef:$src,   // SBUF tile to store from
+    AnyMemRef:$dst,   // HBM destination
+    Variadic<Index>:$indices
+  );
+  let assemblyFormat = "$src `,` $dst `[` $indices `]` `:` type($src) `,` type($dst) attr-dict";
 }
+
 
 def NKI_LaunchOp : NKI_Op<"launch", [SingleBlock, NoTerminator]> {
   let arguments = (ins
