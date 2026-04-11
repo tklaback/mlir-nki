@@ -20,90 +20,49 @@ struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
 
   LogicalResult matchAndRewrite(xilinx::air::LaunchOp launch,
                                 PatternRewriter &rewriter) const override {
-    OperandRange sizes = launch.getSizeOperands();
-    if (sizes.size() != 2)
+    OperandRange launchSizes = launch.getSizeOperands();
+    if (launchSizes.size() != 2)
       return rewriter.notifyMatchFailure(launch, "expected 2D launch");
 
     // walk the segment body
     launch.walk([](xilinx::air::SegmentOp seg) {
-      // replace all occurrences of segments' arguments
-      // with the operand that were assigned to them.
-      for (auto [arg, operand] : llvm::zip(seg.getKernelArguments(), seg.getKernelOperands()))
-        Value(arg).replaceAllUsesWith(operand);
-
-      // erase all block arguments (the segment-local args ---
-      //  they've already been replaced with the operands)
-      Block *segBlock = &seg.getBody().front();
-      segBlock->eraseArguments([](BlockArgument) {return true; });
-      //  erase the last op in the block (segment_terminator)
-      segBlock->back().erase();
-
-      seg->getBlock()->getOperations().splice(seg->getIterator(), segBlock->getOperations());
-      seg.erase();
     });
 
-    Value herdSizeX, herdSizeY;
-    launch.walk([&](xilinx::air::HerdOp herd) {
-      OperandRange herdSizes = herd.getSizeOperands();
-      herdSizeX = herdSizes[0];
-      herdSizeY = herdSizes[1];
-      // Replace ID args and size args (just use size values as placeholder)
-      for (auto [idArg, sizeArg, sizeVal] :
-        llvm::zip(herd.getIds(), herd.getSize(), herd.getSizeOperands())) {
-        Value(idArg).replaceAllUsesWith(sizeVal);
-        Value(sizeArg).replaceAllUsesWith(sizeVal);
-      }
-
-      Block *herdBlock = &herd.getBody().front();
-      herdBlock->eraseArguments([](BlockArgument) {return true; });
-      //  erase the last op in the block (segment_terminator)
-      herdBlock->back().erase();
-
-      herd->getBlock()->getOperations().splice(herd->getIterator(), herdBlock->getOperations());
-      herd.erase();
-    });
-
-    // Flatten the launch with the herd
-    // Compute products
-    Value gridX = arith::MulIOp::create(rewriter, launch.getLoc(), sizes[0], herdSizeX);
-    Value gridY = arith::MulIOp::create(rewriter, launch.getLoc(), sizes[1], herdSizeY);
-
-
-    // Use products for nki.launch
-    auto nkiLaunch = nki::LaunchOp::create(rewriter, launch.getLoc(), gridX, gridY);
-
-    // Move the body block into nki.launch's region.
-    // getBody() returns a Region&, which is a list of blocks.
-    // front() dereferences the first element of that list.
-    // emplaceBlock() constructs a new block directly in the list.
-    Block *airBlock = &launch.getBody().front();
-    nkiLaunch.getBody().emplaceBlock();
-    Block *nkiBlock = &nkiLaunch.getBody().front();
-
-    // Replace ID block args (induction variables) with the sizes themselves as
-    // a placeholder — real program_id lowering comes later.
-    ArrayRef<BlockArgument> ids = launch.getIds();
-    ArrayRef<BlockArgument> sizeArgs = launch.getSize();
+    // getIds are the inductive variables
+    // getSize are the names of the newly assigned bound variables
+    // launchSizes these are the constants that hold the actual size info
+    Block *launchBlock = &launch.getBody().front();
     for (auto [idArg, sizeArg, sizeVal] :
-         llvm::zip(ids, sizeArgs, sizes)) {
+         llvm::zip(launch.getIds(), launch.getSize(), launchSizes))  {
       Value(idArg).replaceAllUsesWith(sizeVal);
       Value(sizeArg).replaceAllUsesWith(sizeVal);
     }
 
-    // Replace kernel block args with the original operands directly —
-    // nki.launch is not IsolatedFromAbove so it can capture them.
+    // these are used to pass down the data structure from the outer scope into the launch.
     for (auto [kernelArg, operand] :
-         llvm::zip(launch.getKernelArguments(), launch.getKernelOperands())) {
+         llvm::zip(launch.getKernelArguments(), launch.getKernelOperands()))
       Value(kernelArg).replaceAllUsesWith(operand);
-    }
 
-    // Erase all block arguments now that uses are replaced.
+    launchBlock->eraseArguments([](BlockArgument) { return true; });
+
+    // Value herdSizeX, herdSizeY;
+    // launch.walk([&](xilinx::air::HerdOp herd) {
+      // Value gridX = arith::MulIOp::create(rewriter, launch.getLoc(), Value(1), Value(1));
+      // Value gridY = arith::MulIOp::create(rewriter, launch.getLoc(), Value(2), Value(2));
+
+    // });
+    Value one = arith::ConstantIndexOp::create(rewriter, launch.getLoc(), 1);
+
+    auto nkiLaunch = nki::LaunchOp::create(rewriter, launch.getLoc(), one, one);
+
+    Block *airBlock = &launch.getBody().front();
+    nkiLaunch.getBody().emplaceBlock();
+    Block *nkiBlock = &nkiLaunch.getBody().front();
+
     airBlock->eraseArguments(
         [](BlockArgument) { return true; });
 
-    // Move ops from the air body into the nki body, dropping the terminator.
     rewriter.mergeBlocks(airBlock, nkiBlock, /*argValues=*/{});
-    // air.launch_terminator is the last op; remove it.
     nkiBlock->back().erase();
 
     rewriter.eraseOp(launch);
