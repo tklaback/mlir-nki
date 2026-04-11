@@ -61,8 +61,14 @@ struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
     for (int i = 0; i < herds.size(); i++) {
       xilinx::air::HerdOp curHerd = herds[i];
       OperandRange herdLaunchSizes = curHerd.getSizeOperands();
-      Value gridX = arith::MulIOp::create(rewriter, launch.getLoc(), herdLaunchSizes[0], launchSizes[0]);
-      Value gridY = arith::MulIOp::create(rewriter, launch.getLoc(), herdLaunchSizes[1], launchSizes[1]);
+      // herdLaunchSizes are defined inside the launch body. Clone their defining
+      // ops to before the launch so gridX/gridY live in the outer scope.
+      rewriter.setInsertionPoint(launch);
+      IRMapping sizeMapping;
+      Value herdSizeX = rewriter.clone(*herdLaunchSizes[0].getDefiningOp(), sizeMapping)->getResult(0);
+      Value herdSizeY = rewriter.clone(*herdLaunchSizes[1].getDefiningOp(), sizeMapping)->getResult(0);
+      Value gridX = arith::MulIOp::create(rewriter, launch.getLoc(), herdSizeX, launchSizes[0]);
+      Value gridY = arith::MulIOp::create(rewriter, launch.getLoc(), herdSizeY, launchSizes[1]);
 
       auto nkiLaunch = nki::LaunchOp::create(rewriter, launch.getLoc(), gridX, gridY);
 
