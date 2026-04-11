@@ -24,8 +24,15 @@ struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
     if (launchSizes.size() != 2)
       return rewriter.notifyMatchFailure(launch, "expected 2D launch");
 
-    // walk the segment body
+    // Inline each segment: replace its block args, then splice its body in place.
     launch.walk([](xilinx::air::SegmentOp seg) {
+      for (auto [arg, operand] : llvm::zip(seg.getKernelArguments(), seg.getKernelOperands()))
+        Value(arg).replaceAllUsesWith(operand);
+      Block *segBlock = &seg.getBody().front();
+      segBlock->eraseArguments([](BlockArgument) { return true; });
+      segBlock->back().erase(); // erase segment_terminator
+      seg->getBlock()->getOperations().splice(seg->getIterator(), segBlock->getOperations());
+      seg.erase();
     });
 
     // getIds are the inductive variables
@@ -47,10 +54,9 @@ struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
 
     // Value herdSizeX, herdSizeY;
     // launch.walk([&](xilinx::air::HerdOp herd) {
-      // Value gridX = arith::MulIOp::create(rewriter, launch.getLoc(), Value(1), Value(1));
-      // Value gridY = arith::MulIOp::create(rewriter, launch.getLoc(), Value(2), Value(2));
 
     // });
+
     Value one = arith::ConstantIndexOp::create(rewriter, launch.getLoc(), 1);
 
     auto nkiLaunch = nki::LaunchOp::create(rewriter, launch.getLoc(), one, one);
