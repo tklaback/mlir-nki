@@ -19,19 +19,34 @@ class NKI_Op<string mnemonic, list<Trait> traits = []> :
 def NKI_LoadOp : NKI_Op<"load"> {
   let arguments = (ins
     AnyMemRef:$src,
-    Variadic<Index>:$indices  // flat list of index values for the tile
+    Index:$offset_x, Index:$offset_y,
+    Index:$size_x,   Index:$size_y,
+    Index:$stride_x, Index:$stride_y
   );
-  let results = (outs AnyMemRef:$result);  // result is SBUF memref, not tensor
-  let assemblyFormat = "$src `[` $indices `]` `:` type($src) `->` type($result) attr-dict";
+  let results = (outs AnyMemRef:$result);
+  let assemblyFormat = [{
+    $src `[` $offset_x `,` $offset_y `]`
+         `[` $size_x   `,` $size_y   `]`
+         `[` $stride_x `,` $stride_y `]`
+    `:` type($src) `->` type($result) attr-dict
+  }];
 }
 
 def NKI_StoreOp : NKI_Op<"store"> {
   let arguments = (ins
-    AnyMemRef:$src,   // SBUF tile to store from
-    AnyMemRef:$dst,   // HBM destination
-    Variadic<Index>:$indices
+    AnyMemRef:$src,
+    AnyMemRef:$dst,
+    Index:$offset_x, Index:$offset_y,
+    Index:$size_x,   Index:$size_y,
+    Index:$stride_x, Index:$stride_y
   );
-  let assemblyFormat = "$src `,` $dst `[` $indices `]` `:` type($src) `,` type($dst) attr-dict";
+  let assemblyFormat = [{
+    $src `,` $dst
+         `[` $offset_x `,` $offset_y `]`
+         `[` $size_x   `,` $size_y   `]`
+         `[` $stride_x `,` $stride_y `]`
+    `:` type($src) `,` type($dst) attr-dict
+  }];
 }
 
 
