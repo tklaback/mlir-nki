@@ -4,6 +4,7 @@
 #include "air/Dialect/AIR/AIRDialect.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/IR/IRMapping.h"
@@ -31,6 +32,7 @@ struct ConvertAIRChannel : public OpRewritePattern<xilinx::air::ChannelPutOp> {
       return rewriter.notifyMatchFailure(put, "no matching channel get");
 
     bool putInHerd = (bool)put->getParentOfType<xilinx::air::HerdOp>();
+    bool getInHerd = (bool)matchedGet->getParentOfType<xilinx::air::HerdOp>();
 
     if (!putInHerd) {
       // Case 1: launch put + herd get → nki.load at the get's location.
@@ -45,6 +47,45 @@ struct ConvertAIRChannel : public OpRewritePattern<xilinx::air::ChannelPutOp> {
                                       offsets[0], offsets[1],
                                       sizes[0],   sizes[1],
                                       strides[0], strides[1]);
+      rewriter.replaceAllUsesWith(matchedGet.getDst(), load.getResult());
+      rewriter.eraseOp(matchedGet);
+      rewriter.eraseOp(put);
+    } else if (getInHerd) {
+      // Case 3: herd put + herd get → route through a shared HBM buffer.
+      // Allocate a flat HBM buffer at the segment level, store into it from
+      // the put's herd, and load from it into the get's herd.
+      auto srcType = cast<MemRefType>(put.getSrc().getType());
+      // Strip the memory space (space 2 = SBUF) to get a plain HBM memref.
+      auto hbmType = MemRefType::get(srcType.getShape(), srcType.getElementType());
+
+      // Insert the HBM alloc before the segment that contains both herds.
+      auto segment = put->getParentOfType<xilinx::air::SegmentOp>();
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.setInsertionPoint(segment ? (Operation*)segment : (Operation*)put->getParentOfType<xilinx::air::LaunchOp>());
+      Value hbmBuf = memref::AllocOp::create(rewriter, put.getLoc(), hbmType, ValueRange{}).getResult();
+
+      // Store from sender herd into HBM buffer at the put's location.
+      rewriter.setInsertionPoint(put);
+      nki::StoreOp::create(rewriter, put.getLoc(),
+                           put.getSrc(), hbmBuf,
+                           arith::ConstantIndexOp::create(rewriter, put.getLoc(), 0),
+                           arith::ConstantIndexOp::create(rewriter, put.getLoc(), 0),
+                           arith::ConstantIndexOp::create(rewriter, put.getLoc(), srcType.getDimSize(0)),
+                           arith::ConstantIndexOp::create(rewriter, put.getLoc(), srcType.getDimSize(1)),
+                           arith::ConstantIndexOp::create(rewriter, put.getLoc(), srcType.getDimSize(1)),
+                           arith::ConstantIndexOp::create(rewriter, put.getLoc(), 1));
+
+      // Load from HBM buffer into receiver herd at the get's location.
+      auto getDstType = cast<MemRefType>(matchedGet.getDst().getType());
+      rewriter.setInsertionPoint(matchedGet);
+      auto load = nki::LoadOp::create(rewriter, matchedGet.getLoc(), getDstType,
+                                      hbmBuf,
+                                      arith::ConstantIndexOp::create(rewriter, matchedGet.getLoc(), 0),
+                                      arith::ConstantIndexOp::create(rewriter, matchedGet.getLoc(), 0),
+                                      arith::ConstantIndexOp::create(rewriter, matchedGet.getLoc(), getDstType.getDimSize(0)),
+                                      arith::ConstantIndexOp::create(rewriter, matchedGet.getLoc(), getDstType.getDimSize(1)),
+                                      arith::ConstantIndexOp::create(rewriter, matchedGet.getLoc(), getDstType.getDimSize(1)),
+                                      arith::ConstantIndexOp::create(rewriter, matchedGet.getLoc(), 1));
       rewriter.replaceAllUsesWith(matchedGet.getDst(), load.getResult());
       rewriter.eraseOp(matchedGet);
       rewriter.eraseOp(put);
