@@ -16,6 +16,58 @@ namespace mlir::nki {
 
 namespace {
 
+struct ConvertAIRChannel : public OpRewritePattern<xilinx::air::ChannelPutOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(xilinx::air::ChannelPutOp put,
+                                PatternRewriter &rewriter) const override {
+    // Find the matching get op by channel name.
+    xilinx::air::ChannelGetOp matchedGet;
+    put->getParentOfType<mlir::ModuleOp>().walk([&](xilinx::air::ChannelGetOp get) {
+      if (get.getChanName() == put.getChanName())
+        matchedGet = get;
+    });
+    if (!matchedGet)
+      return rewriter.notifyMatchFailure(put, "no matching channel get");
+
+    bool putInHerd = (bool)put->getParentOfType<xilinx::air::HerdOp>();
+
+    if (!putInHerd) {
+      // Case 1: launch put + herd get → nki.load at the get's location.
+      // The put describes the HBM source; the get's dst is the SBUF allocation.
+      OperandRange offsets = put.getSrcOffsets();
+      OperandRange sizes   = put.getSrcSizes();
+      OperandRange strides = put.getSrcStrides();
+      auto resultType = cast<MemRefType>(matchedGet.getDst().getType());
+      rewriter.setInsertionPoint(matchedGet);
+      auto load = nki::LoadOp::create(rewriter, put.getLoc(), resultType,
+                                      put.getSrc(),
+                                      offsets[0], offsets[1],
+                                      sizes[0],   sizes[1],
+                                      strides[0], strides[1]);
+      rewriter.replaceAllUsesWith(matchedGet.getDst(), load.getResult());
+      rewriter.eraseOp(matchedGet);
+      rewriter.eraseOp(put);
+    } else {
+      // Case 2: herd put + launch get → nki.store at the put's location.
+      // The get describes the HBM destination; the put's src is the SBUF tile.
+      OperandRange offsets = matchedGet.getDstOffsets();
+      OperandRange sizes   = matchedGet.getDstSizes();
+      OperandRange strides = matchedGet.getDstStrides();
+      rewriter.setInsertionPoint(put);
+      nki::StoreOp::create(rewriter, put.getLoc(),
+                           put.getSrc(), matchedGet.getDst(),
+                           offsets[0], offsets[1],
+                           sizes[0],   sizes[1],
+                           strides[0], strides[1]);
+      rewriter.eraseOp(matchedGet);
+      rewriter.eraseOp(put);
+    }
+
+    return success();
+  }
+};
+
 struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
   using OpRewritePattern::OpRewritePattern;
 
@@ -138,6 +190,7 @@ struct ConvertAIRToNKIPass
 
     RewritePatternSet patterns(&getContext());
 
+    patterns.add<ConvertAIRChannel>(&getContext());
     patterns.add<ConvertAIRLaunch>(&getContext());
 
     // check for failure
