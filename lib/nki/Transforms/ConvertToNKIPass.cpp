@@ -28,7 +28,9 @@ struct ConvertAIRChannel : public OpRewritePattern<xilinx::air::ChannelPutOp> {
       if (get.getChanName() == put.getChanName())
         matchedGet = get;
     });
+
     if (!matchedGet) {
+      llvm::errs() << "NO MATCHED GET ON channel = " << put.getChanName() << "\n";
       return rewriter.notifyMatchFailure(put, "no matching channel get");
     }
 
@@ -36,10 +38,35 @@ struct ConvertAIRChannel : public OpRewritePattern<xilinx::air::ChannelPutOp> {
     bool getInHerd = (bool)matchedGet->getParentOfType<xilinx::air::HerdOp>();
 
     if (!putInHerd) {
-      // This is the case where the put is not in a herd (i.e. a put operation at the launch level; placing values in the channel)
-      // This should be converted into a nki.load inside of the herd (at its air.channel.get location)
-      // The get in the herd gets into a destination tile. Nki.load is different because it doesn't load into that destination buffer, it returns the tile that is then used in place of the destination tile. So, we need to also replace the destination tile and all of its occurrences.
-      // Need to make sure I am not violating dominance by using the return value of nki.load in a path not dominated by the herd.
+      llvm::errs() << "!PUT IN HERD " << put.getChanName() << "\n";
+      // The put is at launch level (placing a global buffer into the channel).
+      // Convert to a nki.load inserted at the get's location inside the herd.
+      // nki.load returns the loaded tile rather than writing into a dst buffer,
+      // so replace the get's dst memref with the nki.load result everywhere.
+
+      // Dominance is safe: the load is inserted at the get site, which is
+      // already inside the herd, so every use of the old dst that the get
+      // dominated is still reachable from the load.
+      // llvm::errs() << "IS GET IN HERD?" << getInHerd << "\n";
+
+      Value src = put.getSrc();
+      auto srcType = cast<MemRefType>(src.getType());
+
+      rewriter.setInsertionPoint(matchedGet);
+      auto loadOp = nki::LoadOp::create(
+          rewriter, matchedGet.getLoc(),
+          srcType,                      // result type matches the source type
+          src,
+          put.getSrcOffsets(),
+          put.getSrcSizes(),
+          put.getSrcStrides());
+
+      // Replace all uses of the get's destination buffer with the load result.
+      matchedGet.getDst().replaceAllUsesWith(loadOp.getResult());
+
+      rewriter.eraseOp(matchedGet);
+      rewriter.eraseOp(put);
+      return success();
     } else if (getInHerd) {
       // This is the case that the put is in the herd and the get is in the herd
       // For this case, we want the producer herd (the one with the put) to replace its air.channel.put with a nki.store into sbuf.
@@ -48,8 +75,7 @@ struct ConvertAIRChannel : public OpRewritePattern<xilinx::air::ChannelPutOp> {
       // This is the case that the put is in the herd and the get is not in the herd.
       // For this case, we need to replace the air.channel.put inside the herd with nki.store.
     }
-
-    return success();
+    return failure();
   }
 };
 
@@ -171,17 +197,19 @@ struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
 
 struct ConvertAIRToNKIPass
     : public impl::ConvertAIRToNKIPassBase<ConvertAIRToNKIPass> {
-  void runOnOperation() override {
+    void runOnOperation() override {
+        // Phase 1: lower channel ops before the launch structure is changed
+        RewritePatternSet channelPatterns(&getContext());
+        channelPatterns.add<ConvertAIRChannel>(&getContext());
+        if (failed(applyPatternsGreedily(getOperation(), std::move(channelPatterns))))
+            signalPassFailure();
 
-    RewritePatternSet patterns(&getContext());
-
-    patterns.add<ConvertAIRChannel>(&getContext());
-    patterns.add<ConvertAIRLaunch>(&getContext());
-
-    // check for failure
-    if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
-      signalPassFailure();
-  }
+        // Phase 2: lower launch/herd structure
+        RewritePatternSet launchPatterns(&getContext());
+        launchPatterns.add<ConvertAIRLaunch>(&getContext());
+        if (failed(applyPatternsGreedily(getOperation(), std::move(launchPatterns))))
+            signalPassFailure();
+    }
 };
 
 } // namespace mlir::nki
