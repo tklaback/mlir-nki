@@ -36,70 +36,17 @@ struct ConvertAIRChannel : public OpRewritePattern<xilinx::air::ChannelPutOp> {
     bool getInHerd = (bool)matchedGet->getParentOfType<xilinx::air::HerdOp>();
 
     if (!putInHerd) {
-      // Case 1: launch put + herd get → nki.load at the get's location.
-      // The put describes the HBM source; the get's dst is the SBUF allocation.
-      OperandRange offsets = put.getSrcOffsets();
-      OperandRange sizes   = put.getSrcSizes();
-      OperandRange strides = put.getSrcStrides();
-      auto resultType = cast<MemRefType>(matchedGet.getDst().getType());
-      rewriter.setInsertionPoint(matchedGet);
-      auto load = nki::LoadOp::create(rewriter, put.getLoc(), resultType, put.getSrc(), offsets, sizes, strides);
-      // rewriter.replaceAllUsesWith(matchedGet.getDst(), load.getResult());
-      // rewriter.eraseOp(matchedGet);
-      // rewriter.eraseOp(put);
+      // This is the case where the put is not in a herd (i.e. a put operation at the launch level; placing values in the channel)
+      // This should be converted into a nki.load inside of the herd (at its air.channel.get location)
+      // The get in the herd gets into a destination tile. Nki.load is different because it doesn't load into that destination buffer, it returns the tile that is then used in place of the destination tile. So, we need to also replace the destination tile and all of its occurrences.
+      // Need to make sure I am not violating dominance by using the return value of nki.load in a path not dominated by the herd.
     } else if (getInHerd) {
-    //   // Case 3: herd put + herd get → route through a shared HBM buffer.
-    //   // Allocate a flat HBM buffer at the segment level, store into it from
-    //   // the put's herd, and load from it into the get's herd.
-    //   auto srcType = cast<MemRefType>(put.getSrc().getType());
-    //   // Strip the memory space (space 2 = SBUF) to get a plain HBM memref.
-    //   auto hbmType = MemRefType::get(srcType.getShape(), srcType.getElementType());
-
-    //   // Insert the HBM alloc before the segment that contains both herds.
-    //   auto segment = put->getParentOfType<xilinx::air::SegmentOp>();
-    //   OpBuilder::InsertionGuard guard(rewriter);
-    //   rewriter.setInsertionPoint(segment ? (Operation*)segment : (Operation*)put->getParentOfType<xilinx::air::LaunchOp>());
-    //   Value hbmBuf = memref::AllocOp::create(rewriter, put.getLoc(), hbmType, ValueRange{}).getResult();
-
-    //   // Store from sender herd into HBM buffer at the put's location.
-    //   rewriter.setInsertionPoint(put);
-    //   nki::StoreOp::create(rewriter, put.getLoc(),
-    //                        put.getSrc(), hbmBuf,
-    //                        arith::ConstantIndexOp::create(rewriter, put.getLoc(), 0),
-    //                        arith::ConstantIndexOp::create(rewriter, put.getLoc(), 0),
-    //                        arith::ConstantIndexOp::create(rewriter, put.getLoc(), srcType.getDimSize(0)),
-    //                        arith::ConstantIndexOp::create(rewriter, put.getLoc(), srcType.getDimSize(1)),
-    //                        arith::ConstantIndexOp::create(rewriter, put.getLoc(), srcType.getDimSize(1)),
-    //                        arith::ConstantIndexOp::create(rewriter, put.getLoc(), 1));
-
-    //   // Load from HBM buffer into receiver herd at the get's location.
-    //   auto getDstType = cast<MemRefType>(matchedGet.getDst().getType());
-    //   rewriter.setInsertionPoint(matchedGet);
-    //   auto load = nki::LoadOp::create(rewriter, matchedGet.getLoc(), getDstType,
-    //                                   hbmBuf,
-    //                                   arith::ConstantIndexOp::create(rewriter, matchedGet.getLoc(), 0),
-    //                                   arith::ConstantIndexOp::create(rewriter, matchedGet.getLoc(), 0),
-    //                                   arith::ConstantIndexOp::create(rewriter, matchedGet.getLoc(), getDstType.getDimSize(0)),
-    //                                   arith::ConstantIndexOp::create(rewriter, matchedGet.getLoc(), getDstType.getDimSize(1)),
-    //                                   arith::ConstantIndexOp::create(rewriter, matchedGet.getLoc(), getDstType.getDimSize(1)),
-    //                                   arith::ConstantIndexOp::create(rewriter, matchedGet.getLoc(), 1));
-    //   rewriter.replaceAllUsesWith(matchedGet.getDst(), load.getResult());
-    //   rewriter.eraseOp(matchedGet);
-    //   rewriter.eraseOp(put);
+      // This is the case that the put is in the herd and the get is in the herd
+      // For this case, we want the producer herd (the one with the put) to replace its air.channel.put with a nki.store into sbuf.
+      // Then, we want the consumer herd to have a barrier that waits until that operation is finished.
     } else {
-    //   // Case 2: herd put + launch get → nki.store at the put's location.
-    //   // The get describes the HBM destination; the put's src is the SBUF tile.
-    //   OperandRange offsets = matchedGet.getDstOffsets();
-    //   OperandRange sizes   = matchedGet.getDstSizes();
-    //   OperandRange strides = matchedGet.getDstStrides();
-    //   rewriter.setInsertionPoint(put);
-    //   nki::StoreOp::create(rewriter, put.getLoc(),
-    //                        put.getSrc(), matchedGet.getDst(),
-    //                        offsets[0], offsets[1],
-    //                        sizes[0],   sizes[1],
-    //                        strides[0], strides[1]);
-    //   rewriter.eraseOp(matchedGet);
-    //   rewriter.eraseOp(put);
+      // This is the case that the put is in the herd and the get is not in the herd.
+      // For this case, we need to replace the air.channel.put inside the herd with nki.store.
     }
 
     return success();
