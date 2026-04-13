@@ -47,7 +47,6 @@ struct ConvertAIRChannel : public OpRewritePattern<xilinx::air::ChannelPutOp> {
       // Dominance is safe: the load is inserted at the get site, which is
       // already inside the herd, so every use of the old dst that the get
       // dominated is still reachable from the load.
-      // llvm::errs() << "IS GET IN HERD?" << getInHerd << "\n";
 
       Value src = put.getSrc();
       auto srcType = cast<MemRefType>(src.getType());
@@ -129,6 +128,7 @@ struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
     }
     else {
       for (int i = 0; i < herds.size(); i++) {
+        rewriter.setInsertionPoint(launch);
         xilinx::air::HerdOp curHerd = herds[i];
         OperandRange herdLaunchSizes = curHerd.getSizeOperands();
         // herdLaunchSizes are defined inside the launch body. Clone their defining
