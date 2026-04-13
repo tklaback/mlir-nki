@@ -9,6 +9,7 @@ add_mlir_dialect_library(NKITransforms
   AIRDialect
   MLIRFuncDialect
   MLIRArithDialect
+  MLIRLinalgDialect
   MLIRMemRefDialect
   MLIRAffineDialect
   MLIRIR
