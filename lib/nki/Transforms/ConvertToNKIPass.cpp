@@ -56,16 +56,16 @@ struct ConvertAIRToNKIPass
         // topological fuse
       }
 
-      RewritePatternSet channelPatterns(&getContext());
-      channelPatterns.add<ConvertAIRChannel>(&getContext());
-      if (failed(applyPatternsGreedily(getOperation(), std::move(channelPatterns))))
-          signalPassFailure();
+    //   RewritePatternSet channelPatterns(&getContext());
+    //   channelPatterns.add<ConvertAIRChannel>(&getContext());
+    //   if (failed(applyPatternsGreedily(getOperation(), std::move(channelPatterns))))
+    //       signalPassFailure();
 
-      // Phase 2: lower launch/herd structure
-      RewritePatternSet launchPatterns(&getContext());
-      launchPatterns.add<ConvertAIRLaunch>(&getContext());
-      if (failed(applyPatternsGreedily(getOperation(), std::move(launchPatterns))))
-          signalPassFailure();
+    //   // Phase 2: lower launch/herd structure
+    //   RewritePatternSet launchPatterns(&getContext());
+    //   launchPatterns.add<ConvertAIRLaunch>(&getContext());
+    //   if (failed(applyPatternsGreedily(getOperation(), std::move(launchPatterns))))
+    //       signalPassFailure();
     }
 };
 

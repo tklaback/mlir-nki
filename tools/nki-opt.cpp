@@ -2,6 +2,8 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "air/Dialect/AIR/AIRDialect.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "nki/Transforms/Passes.h"
@@ -14,6 +16,8 @@ int main(int argc, char **argv) {
     xilinx::air::airDialect,
     mlir::affine::AffineDialect,
     mlir::nki::NKIDialect, 
+    mlir::linalg::LinalgDialect, 
+    mlir::scf::SCFDialect, 
     mlir::func::FuncDialect,
     mlir::memref::MemRefDialect
   >();
