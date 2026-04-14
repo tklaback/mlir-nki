@@ -56,11 +56,65 @@ struct InlineSegment : public OpRewritePattern<xilinx::air::SegmentOp> {
 struct ConvertAIRChannel : public OpRewritePattern<xilinx::air::ChannelPutOp> {
   using OpRewritePattern::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(
-    xilinx::air::ChannelPutOp put, 
-    PatternRewriter &rewriter
-  ) const override {
-    return success();
+  LogicalResult matchAndRewrite(xilinx::air::ChannelPutOp put,
+                                PatternRewriter &rewriter) const override {
+    // Find the matching get op by channel name.
+    xilinx::air::ChannelGetOp matchedGet;
+    put->getParentOfType<mlir::ModuleOp>().walk([&](xilinx::air::ChannelGetOp get) {
+      if (get.getChanName() == put.getChanName())
+        matchedGet = get;
+    });
+
+    if (!matchedGet) {
+      return rewriter.notifyMatchFailure(put, "no matching channel get");
+    }
+
+    bool putInHerd = (bool)put->getParentOfType<xilinx::air::HerdOp>();
+    bool getInHerd = (bool)matchedGet->getParentOfType<xilinx::air::HerdOp>();
+
+    if (!putInHerd) {
+      // The put is at launch level (placing a global buffer into the channel).
+      // Convert to a nki.load inserted at the get's location inside the herd.
+      //
+      // Because HerdOp is IsIsolatedFromAbove, we can't reference the put's
+      // src value directly from inside the herd. Instead, thread it in as a
+      // new kernel operand via appendKernelOperands, which also adds the
+      // corresponding block argument.
+
+      Value src = put.getSrc();
+      auto srcType = cast<MemRefType>(src.getType());
+
+      auto herd = matchedGet->getParentOfType<xilinx::air::HerdOp>();
+      rewriter.modifyOpInPlace(herd, [&]() {
+        herd.appendKernelOperands(ValueRange{src});
+      });
+      // The new block arg is the last one appended.
+      Value srcArg = herd.getBody().getArguments().back();
+
+      rewriter.setInsertionPoint(matchedGet);
+      auto loadOp = nki::LoadOp::create(
+          rewriter, matchedGet.getLoc(),
+          srcType,
+          srcArg,
+          put.getSrcOffsets(),
+          put.getSrcSizes(),
+          put.getSrcStrides());
+
+      // Replace all uses of the get's destination buffer with the load result.
+      matchedGet.getDst().replaceAllUsesWith(loadOp.getResult());
+
+      rewriter.eraseOp(matchedGet);
+      rewriter.eraseOp(put);
+      return success();
+    } else if (getInHerd) {
+      // This is the case that the put is in the herd and the get is in the herd
+      // For this case, we want the producer herd (the one with the put) to replace its air.channel.put with a nki.store into sbuf.
+      // Then, we want the consumer herd to have a barrier that waits until that operation is finished.
+    } else {
+      // This is the case that the put is in the herd and the get is not in the herd.
+      // For this case, we need to replace the air.channel.put inside the herd with nki.store.
+    }
+    return failure();
   }
 };
 
@@ -97,10 +151,10 @@ struct ConvertAIRToNKIPass
       }
       llvm::errs() << names[static_cast<unsigned>(graphType)] << "\n";
 
-    //   RewritePatternSet channelPatterns(&getContext());
-    //   channelPatterns.add<ConvertAIRChannel>(&getContext());
-    //   if (failed(applyPatternsGreedily(getOperation(), std::move(channelPatterns))))
-    //       signalPassFailure();
+      RewritePatternSet channelPatterns(&getContext());
+      channelPatterns.add<ConvertAIRChannel>(&getContext());
+      if (failed(applyPatternsGreedily(getOperation(), std::move(channelPatterns))))
+          signalPassFailure();
 
     //   // Phase 2: lower launch/herd structure
     //   RewritePatternSet launchPatterns(&getContext());
