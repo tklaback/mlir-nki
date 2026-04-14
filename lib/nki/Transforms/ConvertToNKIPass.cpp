@@ -110,9 +110,37 @@ struct ConvertAIRChannel : public OpRewritePattern<xilinx::air::ChannelPutOp> {
       // This is the case that the put is in the herd and the get is in the herd
       // For this case, we want the producer herd (the one with the put) to replace its air.channel.put with a nki.store into sbuf.
       // Then, we want the consumer herd to have a barrier that waits until that operation is finished.
+      // This needs 
     } else {
-      // This is the case that the put is in the herd and the get is not in the herd.
-      // For this case, we need to replace the air.channel.put inside the herd with nki.store.
+      // Put is inside the herd; get is at launch level (herd -> global).
+      // Thread the get's dst into the herd as a new kernel operand, then
+      // replace the put with nki.store(src, dstArg, ...) and erase the get.
+      Value dst = matchedGet.getDst();
+
+      auto herd = put->getParentOfType<xilinx::air::HerdOp>();
+      rewriter.modifyOpInPlace(herd, [&]() {
+        herd.appendKernelOperands(ValueRange{dst});
+      });
+      Value dstArg = herd.getBody().getArguments().back();
+
+      auto getOrZero = [&](ValueRange vals, unsigned idx) -> Value {
+        if (idx < vals.size())
+          return vals[idx];
+        return arith::ConstantIndexOp::create(rewriter, put.getLoc(), 0);
+      };
+
+      rewriter.setInsertionPoint(put);
+      nki::StoreOp::create(
+          rewriter, put.getLoc(),
+          put.getSrc(),
+          dstArg,
+          put.getSrcOffsets(),
+          put.getSrcSizes(),
+          put.getSrcStrides());
+
+      rewriter.eraseOp(put);
+      rewriter.eraseOp(matchedGet);
+      return success();
     }
     return failure();
   }

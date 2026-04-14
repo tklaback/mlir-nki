@@ -34,19 +34,19 @@ def NKI_LoadOp : NKI_Op<"load",
 }
 
 
-def NKI_StoreOp : NKI_Op<"store"> {
+def NKI_StoreOp : NKI_Op<"store", [AttrSizedOperandSegments]> {
   let arguments = (ins
     AnyMemRef:$src,
     AnyMemRef:$dst,
-    Index:$offset_x, Index:$offset_y,
-    Index:$size_x,   Index:$size_y,
-    Index:$stride_x, Index:$stride_y
+    Variadic<Index>:$offsets,
+    Variadic<Index>:$sizes,
+    Variadic<Index>:$strides
   );
   let assemblyFormat = [{
     $src `,` $dst
-         `[` $offset_x `,` $offset_y `]`
-         `[` $size_x   `,` $size_y   `]`
-         `[` $stride_x `,` $stride_y `]`
+         `[` $offsets `]`
+         `[` $sizes `]`
+         `[` $strides `]`
     `:` type($src) `,` type($dst) attr-dict
   }];
 }
