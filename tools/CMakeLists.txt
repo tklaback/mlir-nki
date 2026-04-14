@@ -4,6 +4,7 @@ target_link_libraries(nki-opt PRIVATE
   AIRDialect
   NKIIR
   NKITransforms
+  NKIAnalysis
   MLIROptLib
   MLIRPass
   MLIRFuncDialect

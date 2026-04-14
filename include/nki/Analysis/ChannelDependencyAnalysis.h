@@ -1,18 +1,40 @@
-class ChannelDependencyAnalysis {
-public:
-  ChannelDependencyAnalysis(Operation *op);
+#ifndef NKI_ANALYSIS_CHANNEL_DEPENDENCY_ANALYSIS_H
+#define NKI_ANALYSIS_CHANNEL_DEPENDENCY_ANALYSIS_H
 
-  // query interface
-  bool isFuseable();
-  GraphType getGraphType(); // LINEAR, DAG, FAN
-  SmallVector<air::HerdOp> getTopologicalOrder();
-  SmallVector<air::HerdOp> getProducers(air::ChannelOp channel);
-  SmallVector<air::HerdOp> getConsumers(air::ChannelOp channel);
+#include "mlir/IR/Operation.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/SymbolTable.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "air/Dialect/AIR/AIRDialect.h"
 
-private:
-  void buildGraph(Operation *op);
-  
-  // adjacency: herd -> channels it produces/consumes
-  DenseMap<air::HerdOp, SmallVector<air::ChannelOp>> producerEdges;
-  DenseMap<air::HerdOp, SmallVector<air::ChannelOp>> consumerEdges;
-};
+namespace mlir::nki {
+  enum class ChannelGraphType {
+    LINEAR,
+    DAG,
+    CYCLIC,
+    FANOUT,
+    FANIN,
+  };
+  class ChannelDependencyAnalysis {
+  public:
+    ChannelDependencyAnalysis(Operation *op);
+
+    // query interface
+    bool isFuseable();
+    ChannelGraphType getGraphType(); // LINEAR, DAG, FAN
+    SmallVector<xilinx::air::HerdOp> getTopologicalOrder();
+    SmallVector<xilinx::air::HerdOp> getProducers(xilinx::air::ChannelOp channel);
+    SmallVector<xilinx::air::HerdOp> getConsumers(xilinx::air::ChannelOp channel);
+
+  private:
+    void buildGraph(Operation *op);
+    
+    // adjacency: herd -> channels it produces/consumes
+    DenseMap<xilinx::air::HerdOp, SmallVector<xilinx::air::ChannelOp>> producerEdges;
+    DenseMap<xilinx::air::HerdOp, SmallVector<xilinx::air::ChannelOp>> consumerEdges;
+  };
+} // namespace mlir::nki
+
+#endif // NKI_ANALYSIS_CHANNEL_DEPENDENCY_ANALYSIS_H

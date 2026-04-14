@@ -6,6 +6,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/PatternMatch.h"
+#include "nki/Analysis/ChannelDependencyAnalysis.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/IR/IRMapping.h"
 #include <iostream>
@@ -49,9 +50,9 @@ struct ConvertAIRToNKIPass
 
       auto &analysis = getAnalysis<ChannelDependencyAnalysis>();
   
-      if (analysis.getGraphType() == GraphType::LINEAR) {
+      if (analysis.getGraphType() == ChannelGraphType::LINEAR) {
         // fuse linearly
-      } else if (analysis.getGraphType() == GraphType::DAG) {
+      } else if (analysis.getGraphType() == ChannelGraphType::DAG) {
         // topological fuse
       }
 
