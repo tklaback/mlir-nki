@@ -81,9 +81,13 @@ ChannelGraphType ChannelDependencyAnalysis::getGraphType() {
     return ChannelGraphType::FANIN;
 
   // Check for cycles: if a herd both produces and consumes, it's cyclic.
-  for (auto &[herd, _] : producerEdges)
+  // TODO: Make this into a graph to reason through cycles easier
+  // TODO: Fix the logic here, not sure if this is right
+  for (auto &[herd, channels] : producerEdges)
     if (consumerEdges.count(herd))
-      return ChannelGraphType::CYCLIC;
+      for (auto ch : channels)
+        if (llvm::is_contained(consumerEdges[herd], ch))
+          return ChannelGraphType::CYCLIC;
 
   return ChannelGraphType::LINEAR;
 }

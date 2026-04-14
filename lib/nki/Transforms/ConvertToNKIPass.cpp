@@ -51,11 +51,12 @@ struct ConvertAIRToNKIPass
       auto &analysis = getAnalysis<ChannelDependencyAnalysis>();
   
       constexpr StringRef names[] = {"LINEAR", "DAG", "CYCLIC", "FANOUT", "FANIN"};
-      if (analysis.getGraphType() == ChannelGraphType::LINEAR) {
-      } else if (analysis.getGraphType() == ChannelGraphType::DAG) {
+      ChannelGraphType graphType = analysis.getGraphType();
+      if (graphType == ChannelGraphType::LINEAR) {
+      } else if (graphType == ChannelGraphType::DAG) {
       } else {
       }
-      llvm::errs() << names[static_cast<unsigned>(analysis.getGraphType())] << "\n";
+      llvm::errs() << names[static_cast<unsigned>(graphType)] << "\n";
 
     //   RewritePatternSet channelPatterns(&getContext());
     //   channelPatterns.add<ConvertAIRChannel>(&getContext());
