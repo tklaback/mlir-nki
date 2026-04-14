@@ -24,14 +24,20 @@ void ChannelDependencyAnalysis::buildGraph(Operation *op) {
   // walk all puts and gets, populate edges
   op->walk([&](xilinx::air::ChannelPutOp put) {
     auto herd = put->getParentOfType<xilinx::air::HerdOp>();
-    if (auto channel = lookupChannel(put.getChanName()))
-      producerEdges[herd].push_back(channel);
+    if (herd) {
+      if (auto channel = lookupChannel(put.getChanName())) {
+        producerEdges[herd].push_back(channel);
+      }
+    }
   });
 
   op->walk([&](xilinx::air::ChannelGetOp get) {
     auto herd = get->getParentOfType<xilinx::air::HerdOp>();
-    if (auto channel = lookupChannel(get.getChanName()))
-      consumerEdges[herd].push_back(channel);
+    if (herd) {
+      if (auto channel = lookupChannel(get.getChanName())) {
+        consumerEdges[herd].push_back(channel);
+      }
+    }
   });
 }
 
