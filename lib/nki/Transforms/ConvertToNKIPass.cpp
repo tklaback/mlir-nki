@@ -18,6 +18,41 @@ namespace mlir::nki {
 
 namespace {
 
+// Inlines an air.segment by splicing its body ops into the parent block in
+// place of the segment op. Block arguments (bound to segment_operands) are
+// replaced with the corresponding operand values before inlining.
+struct InlineSegment : public OpRewritePattern<xilinx::air::SegmentOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(xilinx::air::SegmentOp segment,
+                                PatternRewriter &rewriter) const override {
+    Block &body = segment.getBody().front();
+
+    // The block args correspond to segment_operands (after async_dependencies
+    // and sizes). Map each block arg -> its operand value in the parent scope.
+    ValueRange segmentOperands = segment.getSegmentOperands();
+    // Block args: [async_deps..., sizes..., segment_operands...]
+    // Sizes and async token args precede segment_operands in the block arg list.
+    unsigned numAsyncDeps = segment.getAsyncDependencies().size();
+    unsigned numSizes = segment.getSizes().size();
+    unsigned segArgOffset = numAsyncDeps + numSizes;
+
+    for (auto [blockArg, operand] :
+         llvm::zip(body.getArguments().drop_front(segArgOffset),
+                   segmentOperands))
+      rewriter.replaceAllUsesWith(blockArg, operand);
+
+    // Drop the terminator, then splice remaining ops before the segment op.
+    rewriter.eraseOp(body.getTerminator());
+    rewriter.inlineBlockBefore(&body, segment);
+
+    // The segment produces no results we need to forward (async token aside —
+    // if present, callers should have waited on it before this pattern fires).
+    rewriter.eraseOp(segment);
+    return success();
+  }
+};
+
 struct ConvertAIRChannel : public OpRewritePattern<xilinx::air::ChannelPutOp> {
   using OpRewritePattern::OpRewritePattern;
 
@@ -53,6 +88,10 @@ struct ConvertAIRToNKIPass
       constexpr StringRef names[] = {"LINEAR", "DAG", "CYCLIC", "FANOUT", "FANIN"};
       ChannelGraphType graphType = analysis.getGraphType();
       if (graphType == ChannelGraphType::LINEAR) {
+        RewritePatternSet patterns(&getContext());
+        patterns.add<InlineSegment>(&getContext());
+        if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
+          signalPassFailure();
       } else if (graphType == ChannelGraphType::DAG) {
       } else {
       }
