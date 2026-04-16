@@ -284,10 +284,66 @@ struct ConvertAIRChannel : public OpRewritePattern<xilinx::air::ChannelPutOp> {
 struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
   using OpRewritePattern::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(
-    xilinx::air::LaunchOp launch,
-    PatternRewriter &rewriter
-  ) const override {
+  LogicalResult matchAndRewrite(xilinx::air::LaunchOp launch,
+                                PatternRewriter &rewriter) const override {
+    // Expect exactly one herd inside the launch (segment already inlined).
+    xilinx::air::HerdOp herd;
+    launch.walk([&](xilinx::air::HerdOp h) { herd = h; });
+    if (!herd)
+      return rewriter.notifyMatchFailure(launch, "no herd in launch");
+
+    Location loc = launch.getLoc();
+
+    // Step 1: create nki.launch before the air.launch.
+    rewriter.setInsertionPoint(launch);
+    auto nkiLaunch = nki::LaunchOp::create(rewriter, loc);
+    Block *nkiBlock = rewriter.createBlock(&nkiLaunch.getBody());
+
+    // Step 2: replace herd block args with the outer values they represent.
+    // Block arg layout: [tile_0..tile_N, size_0..size_N, kop_0..kop_M]
+    // tile args are unused after fusion (sequential execution) — replace with
+    // the herd's size operands[0] as a dummy index (they'll be DCE'd anyway).
+    // size args -> herd.getSizes()[i]   (defined in the launch body)
+    // kop args  -> herd.getKernelOperands()[i]  (defined in the launch body)
+    Block &herdBody = herd.getBody().front();
+    unsigned numTiles = herd.getNumDims();
+
+    printf("NUM TILES: %u\n", numTiles);
+
+    rewriter.setInsertionPointToStart(nkiBlock);
+    Value zero = arith::ConstantIndexOp::create(rewriter, loc, 0);
+
+    // Build the full replacement list for mergeBlocks — must match
+    // herdBody.getNumArguments() exactly: [tile..., size..., kop...]
+    SmallVector<Value> argReplacements;
+    for (unsigned t = 0; t < numTiles; ++t)
+      argReplacements.push_back(zero);
+    for (Value size : herd.getSizes())
+      argReplacements.push_back(size);
+    for (Value kop : herd.getKernelOperands())
+      argReplacements.push_back(kop);
+
+    // Step 3: merge herd body into nki.launch body and erase the herd.
+    rewriter.eraseOp(herdBody.getTerminator());
+    rewriter.mergeBlocks(&herdBody, nkiBlock, argReplacements);
+    rewriter.eraseOp(herd);
+
+    // Step 4: inline air.launch body before the launch op, then erase it.
+    // Replace all launch body block args with their corresponding operands,
+    // then inline with no remaining args.
+    Block &launchBody = launch.getBody().front();
+    unsigned numLaunchAsyncDeps = launch.getAsyncDependencies().size();
+    unsigned numLaunchSizes = launch.getSizes().size();
+    unsigned launchArgOffset = numLaunchAsyncDeps + numLaunchSizes;
+    SmallVector<Value> launchArgReplacements;
+    for (unsigned i = 0; i < launchArgOffset; ++i)
+      launchArgReplacements.push_back(zero);
+    for (Value operand : launch.getLaunchOperands())
+      launchArgReplacements.push_back(operand);
+    rewriter.eraseOp(launchBody.getTerminator());
+    rewriter.inlineBlockBefore(&launchBody, launch, launchArgReplacements);
+    rewriter.eraseOp(launch);
+
     return success();
   }
 };
@@ -317,6 +373,12 @@ struct ConvertAIRToNKIPass
         RewritePatternSet channelPatterns(&getContext());
         channelPatterns.add<ConvertAIRChannel>(&getContext());
         if (failed(applyPatternsGreedily(getOperation(), std::move(channelPatterns))))
+          signalPassFailure();
+
+        // // Phase 4: convert air.launch + air.herd -> nki.launch.
+        RewritePatternSet launchPatterns(&getContext());
+        launchPatterns.add<ConvertAIRLaunch>(&getContext());
+        if (failed(applyPatternsGreedily(getOperation(), std::move(launchPatterns))))
           signalPassFailure();
       } else if (graphType == ChannelGraphType::DAG) {
         // TODO: parallel launch with barriers

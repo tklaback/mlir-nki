@@ -89,16 +89,11 @@ def NKI_SendRecvOp : NKI_Op<"sendrecv"> {
 }
 
 def NKI_LaunchOp : NKI_Op<"launch", [SingleBlock, NoTerminator]> {
-  let arguments = (ins
-    Index:$grid_x,
-    Index:$grid_y
-  );
   let results = (outs);
 
   let regions = (region SizedRegion<1>:$body);
 
   let assemblyFormat = [{
-    `grid` `[` $grid_x `,` $grid_y `]`
     $body attr-dict
   }];
 }
