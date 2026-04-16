@@ -77,9 +77,30 @@ struct FuseLinearHerds : public OpRewritePattern<xilinx::air::SegmentOp> {
 
       // Replace all uses of the get's destination buffer with the put's source.
       // The consumer now reads directly from the producer's buffer.
-      rewriter.replaceAllUsesWith(getOp.getDst(), putOp.getSrc());
+      Value sharedBuf = putOp.getSrc();
+      Value consumedBuf = getOp.getDst();
+      rewriter.replaceAllUsesWith(consumedBuf, sharedBuf);
       rewriter.eraseOp(getOp);
       rewriter.eraseOp(putOp);
+
+      // Remove all deallocs of sharedBuf across both herds. The buffer must
+      // remain live until the consumer is done — dealloc will be handled after
+      // the merged herd runs (or left for a later cleanup pass).
+      // Also remove the now-dead dealloc of consumedBuf (which after RAUW
+      // would be a second dealloc of sharedBuf).
+      SmallVector<memref::DeallocOp> toErase;
+      producer.walk([&](memref::DeallocOp dealloc) {
+        if (dealloc.getMemref() == sharedBuf)
+          toErase.push_back(dealloc);
+      });
+      consumer.walk([&](memref::DeallocOp dealloc) {
+        // After RAUW, consumedBuf uses were replaced, so check sharedBuf only.
+        if (dealloc.getMemref() == sharedBuf)
+          toErase.push_back(dealloc);
+      });
+      for (auto dealloc : toErase)
+        rewriter.eraseOp(dealloc);
+
       // Erase the channel declaration from the module.
       rewriter.eraseOp(channel);
     }
