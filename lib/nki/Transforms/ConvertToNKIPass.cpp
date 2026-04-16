@@ -42,7 +42,7 @@ struct FuseLinearHerds : public OpRewritePattern<xilinx::air::SegmentOp> {
     // Verify all herds live inside this segment.
     for (auto herd : order)
       if (herd->getParentOfType<xilinx::air::SegmentOp>() != segment) {
-        llvm.errs() << "HERDS NOT IN THIS SEGMENT\n";
+        llvm::errs() << "HERDS NOT IN THIS SEGMENT\n";
         return rewriter.notifyMatchFailure(segment, "herds not in this segment");
       }
 
@@ -86,6 +86,11 @@ struct FuseLinearHerds : public OpRewritePattern<xilinx::air::SegmentOp> {
 
     // Splice bodies of order[1..] into order[0] before its terminator,
     // so all ops run sequentially in producer-first order.
+    //
+    // HerdOp body blocks have block arguments:
+    //   [tile_x, tile_y, size_x, size_y, kernel_operands...]
+    // inlineBlockBefore requires the source block to have no block args, so we
+    // replace them with concrete values before splicing.
     auto baseHerd = order[0];
     Block &baseBlock = baseHerd.getBody().front();
     Operation *baseTerminator = baseBlock.getTerminator();
@@ -93,8 +98,25 @@ struct FuseLinearHerds : public OpRewritePattern<xilinx::air::SegmentOp> {
     for (unsigned i = 1; i < order.size(); ++i) {
       auto herd = order[i];
       Block &srcBlock = herd.getBody().front();
+
+      // Build replacement values for the source block's arguments.
+      // Tile indices -> arith.constant 0 (sequential execution, one tile).
+      // Size args -> the herd's corresponding size operands.
+      // Kernel operands -> the herd's corresponding kernel operand values.
+      SmallVector<Value> argReplacements;
+      Location loc = herd.getLoc();
+      unsigned numTiles = herd.getNumDims(); // number of tile index args
+      rewriter.setInsertionPoint(baseTerminator);
+      Value zero = arith::ConstantIndexOp::create(rewriter, loc, 0);
+      for (unsigned t = 0; t < numTiles; ++t)
+        argReplacements.push_back(zero);
+      for (Value size : herd.getSizes())
+        argReplacements.push_back(size);
+      for (Value kop : herd.getKernelOperands())
+        argReplacements.push_back(kop);
+
       rewriter.eraseOp(srcBlock.getTerminator());
-      rewriter.inlineBlockBefore(&srcBlock, baseTerminator);
+      rewriter.inlineBlockBefore(&srcBlock, baseTerminator, argReplacements);
       rewriter.eraseOp(herd);
     }
 
