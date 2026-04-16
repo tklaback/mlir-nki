@@ -55,25 +55,66 @@ bool ChannelDependencyAnalysis::isFuseable() {
 }
 
 ChannelGraphType ChannelDependencyAnalysis::getGraphType() {
-  
+  // TODO: implement
+  return ChannelGraphType::LINEAR;
 }
 
 SmallVector<xilinx::air::HerdOp>
 ChannelDependencyAnalysis::getTopologicalOrder() {
-  
+  DenseMap<Node *, unsigned> inDeg;
+  for (auto &n : nodes)
+    inDeg[n.get()] = n->inDegree;
+
+  SmallVector<Node *> queue;
+  for (auto &n : nodes)
+    if (inDeg[n.get()] == 0)
+      queue.push_back(n.get());
+
+  SmallVector<xilinx::air::HerdOp> result;
+  while (!queue.empty()) {
+    Node *cur = queue.front();
+    queue.erase(queue.begin());
+    result.push_back(cur->herd);
+    for (auto [nbr, ch] : cur->neighbors) {
+      assert(inDeg[nbr] > 0 && "ERROR, unreachable");
+      if (--inDeg[nbr] == 0)
+        queue.push_back(nbr);
+    }
+  }
+  return result;
 }
 
 SmallVector<xilinx::air::HerdOp>
 ChannelDependencyAnalysis::getProducers(xilinx::air::ChannelOp channel) {
-  
+  SmallVector<xilinx::air::HerdOp> result;
+  for (auto &node : nodes)
+    for (auto [nbr, ch] : node->neighbors)
+      if (ch == channel) {
+        result.push_back(node->herd);
+        break;
+      }
+  return result;
 }
 
 SmallVector<xilinx::air::HerdOp>
 ChannelDependencyAnalysis::getConsumers(xilinx::air::ChannelOp channel) {
-  
+  SmallVector<xilinx::air::HerdOp> result;
+  for (auto &node : nodes)
+    for (auto [nbr, ch] : node->neighbors)
+      if (ch == channel) {
+        result.push_back(nbr->herd);
+        break;
+      }
+  return result;
 }
 
 xilinx::air::ChannelOp ChannelDependencyAnalysis::getChannelBetween(
     xilinx::air::HerdOp producer, xilinx::air::HerdOp consumer) {
-      
+  Node *prodNode = nodeMap.lookup(producer);
+  if (!prodNode)
+    return {};
+  for (auto [nbr, ch] : prodNode->neighbors)
+    if (nbr->herd == consumer)
+      return ch;
+  return {};
 }
