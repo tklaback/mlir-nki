@@ -47,7 +47,9 @@ struct FuseLinearHerds : public OpRewritePattern<xilinx::air::SegmentOp> {
       }
 
     // For each consecutive pair, eliminate the connecting channel.
-    // Will only work with linear
+    // Collect sharedBufs here (before erasing puts) so we can re-insert
+    // deallocs after the merge.
+    SmallVector<Value> sharedBufsToDealloc;
     for (unsigned i = 0; i + 1 < order.size(); ++i) {
       auto producer = order[i];
       auto consumer = order[i + 1];
@@ -60,7 +62,6 @@ struct FuseLinearHerds : public OpRewritePattern<xilinx::air::SegmentOp> {
       }
 
       StringAttr chanName = channel.getSymNameAttr();
-      llvm::errs() << "CHANNEL NAME: " << chanName << "\n";
 
       // Find the put in the producer herd body.
       xilinx::air::ChannelPutOp putOp;
@@ -79,26 +80,28 @@ struct FuseLinearHerds : public OpRewritePattern<xilinx::air::SegmentOp> {
         return rewriter.notifyMatchFailure(
             segment, "could not find put/get for herd-to-herd channel");
 
-      // Replace all uses of the get's destination buffer with the put's source.
-      // The consumer now reads directly from the producer's buffer.
       Value sharedBuf = putOp.getSrc();
       Value consumedBuf = getOp.getDst();
+
+      // Save sharedBuf before erasing putOp so we can dealloc it later.
+      sharedBufsToDealloc.push_back(sharedBuf);
+
+      // Replace consumedBuf uses with sharedBuf so the consumer ops refer to
+      // the producer's allocation directly.
       rewriter.replaceAllUsesWith(consumedBuf, sharedBuf);
       rewriter.eraseOp(getOp);
       rewriter.eraseOp(putOp);
 
-      // Remove all deallocs of sharedBuf across both herds. The buffer must
-      // remain live until the consumer is done — dealloc will be handled after
-      // the merged herd runs (or left for a later cleanup pass).
-      // Also remove the now-dead dealloc of consumedBuf (which after RAUW
-      // would be a second dealloc of sharedBuf).
+      // Remove all deallocs of sharedBuf from both herds — the producer's
+      // dealloc fires too early (before consumer ops run), and after RAUW the
+      // consumer may have a dealloc of consumedBuf that is now a double-free.
+      // We re-insert a single dealloc just before the merged terminator below.
       SmallVector<memref::DeallocOp> toErase;
       producer.walk([&](memref::DeallocOp dealloc) {
         if (dealloc.getMemref() == sharedBuf)
           toErase.push_back(dealloc);
       });
       consumer.walk([&](memref::DeallocOp dealloc) {
-        // After RAUW, consumedBuf uses were replaced, so check sharedBuf only.
         if (dealloc.getMemref() == sharedBuf)
           toErase.push_back(dealloc);
       });
@@ -144,6 +147,12 @@ struct FuseLinearHerds : public OpRewritePattern<xilinx::air::SegmentOp> {
       rewriter.inlineBlockBefore(&srcBlock, baseTerminator, argReplacements);
       rewriter.eraseOp(herd);
     }
+
+    // Re-insert deallocs for sharedBufs just before the merged terminator.
+    // Now that all consumer ops are in the same block, this is safe.
+    rewriter.setInsertionPoint(baseTerminator);
+    for (Value buf : sharedBufsToDealloc)
+      memref::DeallocOp::create(rewriter, baseHerd.getLoc(), buf);
 
     return success();
   }
