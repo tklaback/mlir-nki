@@ -47,16 +47,20 @@ struct FuseLinearHerds : public OpRewritePattern<xilinx::air::SegmentOp> {
       }
 
     // For each consecutive pair, eliminate the connecting channel.
+    // Will only work with linear
     for (unsigned i = 0; i + 1 < order.size(); ++i) {
       auto producer = order[i];
       auto consumer = order[i + 1];
 
       xilinx::air::ChannelOp channel =
           analysis->getChannelBetween(producer, consumer);
-      if (!channel)
+      if (!channel) {
+        llvm::errs() << "NO CHANNEL BETWEEN HERDS\n";
         return rewriter.notifyMatchFailure(segment, "no channel between herds");
+      }
 
       StringAttr chanName = channel.getSymNameAttr();
+      llvm::errs() << "CHANNEL NAME: " << chanName << "\n";
 
       // Find the put in the producer herd body.
       xilinx::air::ChannelPutOp putOp;
