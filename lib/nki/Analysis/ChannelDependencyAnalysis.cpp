@@ -23,12 +23,12 @@ void ChannelDependencyAnalysis::buildGraph(Operation *op) {
   // herds that have a get on the same channel and add an edge.
   op->walk([&](xilinx::air::HerdOp herdA) {
     herdA.walk([&](xilinx::air::ChannelPutOp put) {
-      StringAttr chanName = put.getChanNameAttr();
+      StringAttr chanName = put.getChanNameAttr().getAttr();
 
       op->walk([&](xilinx::air::HerdOp herdB) {
         if (herdB == herdA) return;
         herdB.walk([&](xilinx::air::ChannelGetOp get) {
-          if (get.getChanNameAttr() != chanName) return;
+          if (get.getChanNameAttr().getAttr() != chanName) return;
 
           // herdA produces into herdB via this channel.
           Node *nodeA = getOrCreateNode(herdA);
