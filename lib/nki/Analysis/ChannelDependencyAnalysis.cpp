@@ -129,3 +129,16 @@ ChannelDependencyAnalysis::getConsumers(xilinx::air::ChannelOp channel) {
         result.push_back(herd);
   return result;
 }
+
+xilinx::air::ChannelOp ChannelDependencyAnalysis::getChannelBetween(
+    xilinx::air::HerdOp producer, xilinx::air::HerdOp consumer) {
+  auto prodIt = producerEdges.find(producer);
+  auto consIt = consumerEdges.find(consumer);
+  if (prodIt == producerEdges.end() || consIt == consumerEdges.end())
+    return {};
+  // Return the first channel that appears in both edge lists.
+  for (auto ch : prodIt->second)
+    if (llvm::is_contained(consIt->second, ch))
+      return ch;
+  return {};
+}

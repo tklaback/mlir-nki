@@ -18,6 +18,90 @@ namespace mlir::nki {
 
 namespace {
 
+// For a LINEAR channel graph, fuse all herds in topological order into a
+// single merged herd, eliminating the herd-to-herd channels.
+//
+// For each consecutive pair (producer, consumer) in topological order:
+//   - Find the channel.put in the producer and the channel.get in the consumer.
+//   - Replace all uses of the get's dst buffer with the put's src buffer
+//     (so the consumer operates directly on the producer's allocation).
+//   - Erase the put, the get, and the channel declaration.
+// Then splice all subsequent herd bodies into order[0], leaving one herd.
+struct FuseLinearHerds : public OpRewritePattern<xilinx::air::SegmentOp> {
+  ChannelDependencyAnalysis *analysis;
+
+  FuseLinearHerds(MLIRContext *ctx, ChannelDependencyAnalysis *analysis)
+      : OpRewritePattern(ctx), analysis(analysis) {}
+
+  LogicalResult matchAndRewrite(xilinx::air::SegmentOp segment,
+                                PatternRewriter &rewriter) const override {
+    SmallVector<xilinx::air::HerdOp> order = analysis->getTopologicalOrder();
+    if (order.size() < 2)
+      return rewriter.notifyMatchFailure(segment, "nothing to fuse");
+
+    // Verify all herds live inside this segment.
+    for (auto herd : order)
+      if (herd->getParentOfType<xilinx::air::SegmentOp>() != segment) {
+        llvm.errs() << "HERDS NOT IN THIS SEGMENT\n";
+        return rewriter.notifyMatchFailure(segment, "herds not in this segment");
+      }
+
+    // For each consecutive pair, eliminate the connecting channel.
+    for (unsigned i = 0; i + 1 < order.size(); ++i) {
+      auto producer = order[i];
+      auto consumer = order[i + 1];
+
+      xilinx::air::ChannelOp channel =
+          analysis->getChannelBetween(producer, consumer);
+      if (!channel)
+        return rewriter.notifyMatchFailure(segment, "no channel between herds");
+
+      StringAttr chanName = channel.getSymNameAttr();
+
+      // Find the put in the producer herd body.
+      xilinx::air::ChannelPutOp putOp;
+      producer.walk([&](xilinx::air::ChannelPutOp op) {
+        if (op.getChanName() == chanName)
+          putOp = op;
+      });
+      // Find the get in the consumer herd body.
+      xilinx::air::ChannelGetOp getOp;
+      consumer.walk([&](xilinx::air::ChannelGetOp op) {
+        if (op.getChanName() == chanName)
+          getOp = op;
+      });
+
+      if (!putOp || !getOp)
+        return rewriter.notifyMatchFailure(
+            segment, "could not find put/get for herd-to-herd channel");
+
+      // Replace all uses of the get's destination buffer with the put's source.
+      // The consumer now reads directly from the producer's buffer.
+      rewriter.replaceAllUsesWith(getOp.getDst(), putOp.getSrc());
+      rewriter.eraseOp(getOp);
+      rewriter.eraseOp(putOp);
+      // Erase the channel declaration from the module.
+      rewriter.eraseOp(channel);
+    }
+
+    // Splice bodies of order[1..] into order[0] before its terminator,
+    // so all ops run sequentially in producer-first order.
+    auto baseHerd = order[0];
+    Block &baseBlock = baseHerd.getBody().front();
+    Operation *baseTerminator = baseBlock.getTerminator();
+
+    for (unsigned i = 1; i < order.size(); ++i) {
+      auto herd = order[i];
+      Block &srcBlock = herd.getBody().front();
+      rewriter.eraseOp(srcBlock.getTerminator());
+      rewriter.inlineBlockBefore(&srcBlock, baseTerminator);
+      rewriter.eraseOp(herd);
+    }
+
+    return success();
+  }
+};
+
 // Inlines an air.segment by splicing its body ops into the parent block in
 // place of the segment op. Block arguments (bound to segment_operands) are
 // replaced with the corresponding operand values before inlining.
@@ -106,11 +190,13 @@ struct ConvertAIRChannel : public OpRewritePattern<xilinx::air::ChannelPutOp> {
       rewriter.eraseOp(matchedGet);
       rewriter.eraseOp(put);
       return success();
-    } else if (getInHerd) {
-      // This is the case that the put is in the herd and the get is in the herd
-      // For this case, we want the producer herd (the one with the put) to replace its air.channel.put with a nki.store into sbuf.
-      // Then, we want the consumer herd to have a barrier that waits until that operation is finished.
-      // This needs 
+    } else if (putInHerd && getInHerd) {
+      // Both put and get are inside herds. FuseLinearHerds should have already
+      // eliminated all herd-to-herd channels before this pattern runs.
+      // If we reach here, it means the graph was not LINEAR (e.g. DAG/CYCLIC)
+      // and this case is not yet implemented.
+      return rewriter.notifyMatchFailure(
+          put, "herd-to-herd channel not eliminated by fusion (non-LINEAR?)");
     } else {
       // Put is inside the herd; get is at launch level (herd -> global).
       // Thread the get's dst into the herd as a new kernel operand, then
@@ -122,12 +208,6 @@ struct ConvertAIRChannel : public OpRewritePattern<xilinx::air::ChannelPutOp> {
         herd.appendKernelOperands(ValueRange{dst});
       });
       Value dstArg = herd.getBody().getArguments().back();
-
-      auto getOrZero = [&](ValueRange vals, unsigned idx) -> Value {
-        if (idx < vals.size())
-          return vals[idx];
-        return arith::ConstantIndexOp::create(rewriter, put.getLoc(), 0);
-      };
 
       rewriter.setInsertionPoint(put);
       nki::StoreOp::create(
@@ -142,7 +222,6 @@ struct ConvertAIRChannel : public OpRewritePattern<xilinx::air::ChannelPutOp> {
       rewriter.eraseOp(matchedGet);
       return success();
     }
-    return failure();
   }
 };
 
@@ -162,33 +241,33 @@ struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
 struct ConvertAIRToNKIPass
     : public impl::ConvertAIRToNKIPassBase<ConvertAIRToNKIPass> {
     void runOnOperation() override {
-      // Phase 1: lower channel ops before the launch structure is changed
-
-
       auto &analysis = getAnalysis<ChannelDependencyAnalysis>();
-  
-      constexpr StringRef names[] = {"LINEAR", "DAG", "CYCLIC", "FANOUT", "FANIN"};
       ChannelGraphType graphType = analysis.getGraphType();
+
       if (graphType == ChannelGraphType::LINEAR) {
-        RewritePatternSet patterns(&getContext());
-        patterns.add<InlineSegment>(&getContext());
-        if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
+        // Phase 1: fuse herds — erase herd-to-herd channels, merge bodies.
+        RewritePatternSet fusePatterns(&getContext());
+        fusePatterns.add<FuseLinearHerds>(&getContext(), &analysis);
+        if (failed(applyPatternsGreedily(getOperation(), std::move(fusePatterns))))
+          signalPassFailure();
+
+        // Phase 2: inline air.segment into the launch body.
+        RewritePatternSet inlinePatterns(&getContext());
+        inlinePatterns.add<InlineSegment>(&getContext());
+        if (failed(applyPatternsGreedily(getOperation(), std::move(inlinePatterns))))
+          signalPassFailure();
+
+        // Phase 3: lower launch↔herd boundary channels (load/store).
+        RewritePatternSet channelPatterns(&getContext());
+        channelPatterns.add<ConvertAIRChannel>(&getContext());
+        if (failed(applyPatternsGreedily(getOperation(), std::move(channelPatterns))))
           signalPassFailure();
       } else if (graphType == ChannelGraphType::DAG) {
+        // TODO: parallel launch with barriers
       } else {
+        // CYCLIC, FANOUT, FANIN: not yet implemented.
+        signalPassFailure();
       }
-      llvm::errs() << names[static_cast<unsigned>(graphType)] << "\n";
-
-      RewritePatternSet channelPatterns(&getContext());
-      channelPatterns.add<ConvertAIRChannel>(&getContext());
-      if (failed(applyPatternsGreedily(getOperation(), std::move(channelPatterns))))
-          signalPassFailure();
-
-    //   // Phase 2: lower launch/herd structure
-    //   RewritePatternSet launchPatterns(&getContext());
-    //   launchPatterns.add<ConvertAIRLaunch>(&getContext());
-    //   if (failed(applyPatternsGreedily(getOperation(), std::move(launchPatterns))))
-    //       signalPassFailure();
     }
 };
 

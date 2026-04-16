@@ -27,6 +27,9 @@ namespace mlir::nki {
     SmallVector<xilinx::air::HerdOp> getTopologicalOrder();
     SmallVector<xilinx::air::HerdOp> getProducers(xilinx::air::ChannelOp channel);
     SmallVector<xilinx::air::HerdOp> getConsumers(xilinx::air::ChannelOp channel);
+    // Returns the channel connecting producer -> consumer, or null if none.
+    xilinx::air::ChannelOp getChannelBetween(xilinx::air::HerdOp producer,
+                                              xilinx::air::HerdOp consumer);
 
   private:
     void buildGraph(Operation *op);
