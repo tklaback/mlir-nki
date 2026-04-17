@@ -16,6 +16,7 @@ namespace mlir::nki {
 
 struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
   int indentLevel = 0;
+  DenseMap<Value, std::string> valueNames;
 
   llvm::raw_ostream &indent() {
     return llvm::outs() << std::string(indentLevel * 4, ' ');
@@ -32,7 +33,6 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
       }
       llvm::outs() << "):\n";
       indentLevel++;
-      indent() << "pass";
     } else if (stage.isAfterAllRegions()) {
       indentLevel--;
       llvm::outs() << "\n";
@@ -41,7 +41,14 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
 
   void emitConstant(arith::ConstantOp op, const WalkStage &stage) {
     if (!stage.isBeforeAllRegions()) return;
-    // TODO: emit constant
+  }
+
+  void emitAlloc(memref::AllocOp op, const WalkStage &stage) {
+    if (!stage.isBeforeAllRegions()) return;
+    Value result = op.getResult();
+    std::string name = "alloc_" + std::to_string(valueNames.size());
+    valueNames[result] = name;
+    indent() << name << " = nl.ndarray(...)\n";
   }
 
   void emitFor(scf::ForOp op, const WalkStage &stage) {
@@ -75,6 +82,8 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
         emitConstant(konst, stage);
       else if (auto scfFor = dyn_cast<scf::ForOp>(op))
         emitFor(scfFor, stage);
+      else if (auto alloc = dyn_cast<memref::AllocOp>(op))
+        emitAlloc(alloc, stage);
       else if (auto load = dyn_cast<nki::LoadOp>(op))
         emitLoad(load, stage);
       else if (auto store = dyn_cast<nki::StoreOp>(op))
