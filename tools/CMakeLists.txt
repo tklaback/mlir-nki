@@ -13,5 +13,7 @@ target_link_libraries(nki-opt PRIVATE
   MLIRTensorDialect
   MLIRSCFDialect
   MLIRLinalgDialect
+  MLIRLinalgTransforms
   MLIRMemRefDialect
+  MLIRTransforms
 )
