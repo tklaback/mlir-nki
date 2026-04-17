@@ -375,6 +375,11 @@ struct ConvertAIRToNKIPass
         if (failed(applyPatternsGreedily(getOperation(), std::move(channelPatterns))))
           signalPassFailure();
 
+        // Erase air.channel declarations now that all put/get ops are gone.
+        getOperation()->walk([](xilinx::air::ChannelOp ch) {
+          ch.erase();
+        });
+
         // // Phase 4: convert air.launch + air.herd -> nki.launch.
         RewritePatternSet launchPatterns(&getContext());
         launchPatterns.add<ConvertAIRLaunch>(&getContext());
