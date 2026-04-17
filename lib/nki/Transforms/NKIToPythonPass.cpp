@@ -18,6 +18,16 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
   int indentLevel = 0;
   DenseMap<Value, std::string> valueNames;
 
+  std::string mlirTypeToNKI(Type type) {
+    if (type.isInteger(32)) return "int32";
+    if (type.isInteger(16)) return "int16";
+    if (type.isInteger(8))  return "int8";
+    if (type.isF32())       return "float32";
+    if (type.isF16())       return "float16";
+    if (type.isBF16())      return "bfloat16";
+    return "unknown";
+  }
+
   llvm::raw_ostream &indent() {
     return llvm::outs() << std::string(indentLevel * 4, ' ');
   }
@@ -58,7 +68,15 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
     Value result = op.getResult();
     std::string name = "alloc_" + std::to_string(valueNames.size());
     valueNames[result] = name;
-    indent() << name << " = nl.ndarray(...)\n";
+    auto memrefType = cast<MemRefType>(op.getResult().getType());
+    std::string shape = "(";
+    for (unsigned i = 0; i < memrefType.getRank(); ++i) {
+      if (i > 0) shape += ", ";
+      shape += std::to_string(memrefType.getDimSize(i));
+    }
+    shape += ")";
+    std::string dtype = "nl." + mlirTypeToNKI(memrefType.getElementType());
+    indent() << name << " = nl.ndarray(" << shape << ", dtype=" << dtype << ")\n";
   }
 
   void emitFor(scf::ForOp op, const WalkStage &stage) {
