@@ -11,21 +11,26 @@ namespace mlir::nki {
 #include "nki/Transforms/Passes.h.inc"
 
 struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
+  int indentLevel = 0;
+
+  llvm::raw_ostream &indent() {
+    return llvm::outs() << std::string(indentLevel * 4, ' ');
+  }
+
   void runOnOperation() override {
     llvm::outs() << "import neuronxcc.nki as nki\n";
     llvm::outs() << "import neuronxcc.nki.language as nl\n";
     llvm::outs() << "import numpy as np\n\n";
 
-    getOperation()->walk([](func::FuncOp func) {
-      llvm::outs() << "@nki.jit\n";
-      llvm::outs() << "def " << func.getName() << "(";
-      auto args = func.getArguments();
-      for (unsigned i = 0; i < args.size(); ++i) {
-        if (i > 0) llvm::outs() << ", ";
-        llvm::outs() << "arg" << i;
+    getOperation()->walk([this](func::FuncOp func, const WalkStage &stage) {
+      if (stage.isBeforeAllRegions()) {
+        indent() << "@nki.jit\n";
+        indent() << "def " << func.getName() << "():\n";
+        indentLevel++;
+        indent() << "pass\n";
+      } else if (stage.isAfterAllRegions()) {
+        indentLevel--;
       }
-      llvm::outs() << "):\n";
-      llvm::outs() << "    pass\n\n";
     });
   }
 };
