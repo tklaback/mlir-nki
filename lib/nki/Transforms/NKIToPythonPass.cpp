@@ -28,8 +28,10 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
       indent() << "def " << op.getName() << "(";
       auto args = op.getArguments();
       for (unsigned i = 0; i < args.size(); ++i) {
+        std::string name = "arg" + std::to_string(i);
+        valueNames[args[i]] = name;
         if (i > 0) llvm::outs() << ", ";
-        llvm::outs() << "arg" << i;
+        llvm::outs() << name;
       }
       llvm::outs() << "):\n";
       indentLevel++;
@@ -74,8 +76,12 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
   }
 
   void emitLoad(nki::LoadOp op, const WalkStage &stage) {
+    // TODO: emit so that offsets, sizes, and strides are included
     if (!stage.isBeforeAllRegions()) return;
-    // TODO: emit nl.load
+    std::string name = "tmp_" + std::to_string(valueNames.size());
+    valueNames[op.getResult()] = name;
+    auto src = valueNames.lookup(op.getSrc());
+    indent() << name << " = nl.load(" << src << ")\n";
   }
 
   void emitStore(nki::StoreOp op, const WalkStage &stage) {
