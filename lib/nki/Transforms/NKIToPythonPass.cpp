@@ -84,9 +84,50 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
     indent() << name << " = nl.load(" << src << ")\n";
   }
 
+  void emitMemRefLoad(memref::LoadOp op, const WalkStage &stage) {
+    if (!stage.isBeforeAllRegions()) return;
+    auto buf = valueNames.lookup(op.getMemRef());
+    std::string expr = buf + "[";
+    auto indices = op.getIndices();
+    for (unsigned i = 0; i < indices.size(); ++i) {
+      if (i > 0) expr += ", ";
+      expr += valueNames.lookup(indices[i]);
+    }
+    expr += "]";
+    valueNames[op.getResult()] = expr;
+  }
+
+  void emitArith(Operation *op, const WalkStage &stage) {
+    if (!stage.isBeforeAllRegions()) return;
+    std::string lhs = valueNames.lookup(op->getOperand(0));
+    std::string rhs = valueNames.lookup(op->getOperand(1));
+    std::string pyOp;
+    if (isa<arith::MulIOp, arith::MulFOp>(op)) pyOp = " * ";
+    else if (isa<arith::AddIOp, arith::AddFOp>(op)) pyOp = " + ";
+    else if (isa<arith::SubIOp, arith::SubFOp>(op)) pyOp = " - ";
+    else pyOp = " ? ";
+    valueNames[op->getResult(0)] = lhs + pyOp + rhs;
+  }
+
+  void emitMemRefStore(memref::StoreOp op, const WalkStage &stage) {
+    if (!stage.isBeforeAllRegions()) return;
+    auto buf = valueNames.lookup(op.getMemRef());
+    auto val = valueNames.lookup(op.getValue());
+    std::string idx = "[";
+    auto indices = op.getIndices();
+    for (unsigned i = 0; i < indices.size(); ++i) {
+      if (i > 0) idx += ", ";
+      idx += valueNames.lookup(indices[i]);
+    }
+    idx += "]";
+    indent() << buf << idx << " = " << val << "\n";
+  }
+
   void emitStore(nki::StoreOp op, const WalkStage &stage) {
     if (!stage.isBeforeAllRegions()) return;
-    // TODO: emit nl.store
+    auto src = valueNames.lookup(op.getSrc());
+    auto dst = valueNames.lookup(op.getDst());
+    indent() << "nl.store(" << dst << ", " << src << ")\n";
   }
 
   void runOnOperation() override {
@@ -107,6 +148,13 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
         emitLoad(load, stage);
       else if (auto store = dyn_cast<nki::StoreOp>(op))
         emitStore(store, stage);
+      else if (auto load = dyn_cast<memref::LoadOp>(op))
+        emitMemRefLoad(load, stage);
+      else if (auto store = dyn_cast<memref::StoreOp>(op))
+        emitMemRefStore(store, stage);
+      else if (isa<arith::MulIOp, arith::MulFOp, arith::AddIOp, arith::AddFOp,
+                   arith::SubIOp, arith::SubFOp>(op))
+        emitArith(op, stage);
     });
   }
 };
