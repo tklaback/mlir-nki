@@ -41,6 +41,14 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
 
   void emitConstant(arith::ConstantOp op, const WalkStage &stage) {
     if (!stage.isBeforeAllRegions()) return;
+    if (auto intAttr = dyn_cast<IntegerAttr>(op.getValue()))
+      valueNames[op.getResult()] = std::to_string(intAttr.getInt());
+    else {
+      std::string val;
+      llvm::raw_string_ostream ss(val);
+      op.getValue().print(ss);
+      valueNames[op.getResult()] = val;
+    }
   }
 
   void emitAlloc(memref::AllocOp op, const WalkStage &stage) {
@@ -53,7 +61,12 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
 
   void emitFor(scf::ForOp op, const WalkStage &stage) {
     if (stage.isBeforeAllRegions()) {
-      // TODO: emit for loop header
+      std::string iv = "i" + std::to_string(indentLevel);
+      valueNames[op.getInductionVar()] = iv;
+      auto lb = valueNames.lookup(op.getLowerBound());
+      auto ub = valueNames.lookup(op.getUpperBound());
+      auto step = valueNames.lookup(op.getStep());
+      indent() << "for " << iv << " in range(" << lb << ", " << ub << ", " << step << "):\n";
       indentLevel++;
     } else if (stage.isAfterAllRegions()) {
       indentLevel--;
