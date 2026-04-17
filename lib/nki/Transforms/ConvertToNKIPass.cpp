@@ -57,7 +57,7 @@ struct FuseLinearHerds : public OpRewritePattern<xilinx::air::SegmentOp> {
       xilinx::air::ChannelOp channel =
           analysis->getChannelBetween(producer, consumer);
       if (!channel) {
-        llvm::errs() << "NO CHANNEL BETWEEN HERDS\n";
+        // llvm::errs() << "NO CHANNEL BETWEEN HERDS\n";
         return rewriter.notifyMatchFailure(segment, "no channel between herds");
       }
 
@@ -308,7 +308,7 @@ struct ConvertAIRLaunch : public OpRewritePattern<xilinx::air::LaunchOp> {
     Block &herdBody = herd.getBody().front();
     unsigned numTiles = herd.getNumDims();
 
-    printf("NUM TILES: %u\n", numTiles);
+    // printf("NUM TILES: %u\n", numTiles);
 
     rewriter.setInsertionPointToStart(nkiBlock);
     Value zero = arith::ConstantIndexOp::create(rewriter, loc, 0);
