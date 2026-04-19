@@ -88,6 +88,21 @@ def NKI_SendRecvOp : NKI_Op<"sendrecv"> {
   }];
 }
 
+// Elementwise op over full memref tiles. kind encodes the arith op:
+// 0=mul, 1=add, 2=sub. Lowers to nl.multiply / nl.add / nl.subtract.
+def NKI_ElementwiseOp : NKI_Op<"elementwise"> {
+  let arguments = (ins
+    AnyMemRef:$lhs,
+    AnyType:$rhs,
+    AnyMemRef:$output,
+    I32Attr:$kind
+  );
+  let assemblyFormat = [{
+    `kind` `(` $kind `)` $lhs `,` $rhs `->` $output
+    `:` type($lhs) `,` type($rhs) `->` type($output) attr-dict
+  }];
+}
+
 def NKI_LaunchOp : NKI_Op<"launch", [SingleBlock, NoTerminator]> {
   let results = (outs);
 
