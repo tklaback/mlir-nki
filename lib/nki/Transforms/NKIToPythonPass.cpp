@@ -33,19 +33,47 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
   }
 
   void emitFunc(func::FuncOp op, const WalkStage &stage) {
+    // TODO: Fix this emitter so that it is more generic.
+    // This entails writing out all possible cases.
     if (stage.isBeforeAllRegions()) {
+      // Classify args: output args are memrefs only used as nki.store dst.
+      auto args = op.getArguments();
+      SmallVector<Value> outputArgs;
+      for (Value arg : args) {
+        if (!isa<MemRefType>(arg.getType())) continue;
+        // Arg is output if every use is as a nki.store destination.
+        bool isOutput = !arg.use_empty() && llvm::all_of(arg.getUsers(), [&](Operation *user) {
+          auto store = dyn_cast<nki::StoreOp>(user);
+          return store && store.getDst() == arg;
+        });
+        if (isOutput)
+          outputArgs.push_back(arg);
+      }
+
       indent() << "@nki.jit\n";
       indent() << "def " << op.getName() << "(";
-      auto args = op.getArguments();
-      for (unsigned i = 0; i < args.size(); ++i) {
-        std::string name = "arg" + std::to_string(i);
-        valueNames[args[i]] = name;
-        if (i > 0) llvm::outs() << ", ";
+      bool first = true;
+      for (Value arg : args) {
+        if (llvm::is_contained(outputArgs, arg)) continue;
+        std::string name = "arg" + std::to_string(cast<BlockArgument>(arg).getArgNumber());
+        valueNames[arg] = name;
+        if (!first) llvm::outs() << ", ";
         llvm::outs() << name;
+        first = false;
       }
       llvm::outs() << "):\n";
       indentLevel++;
+
+      // Emit output allocations inside the function body.
+      for (Value arg : outputArgs) {
+        valueNames[arg] = "out";
+        auto memrefType = cast<MemRefType>(arg.getType());
+        // Use arg0.shape / arg0.dtype to stay generic.
+        indent() << "out = nl.ndarray(arg0.shape, dtype=arg0.dtype, buffer=nl.shared_hbm)\n";
+        (void)memrefType;
+      }
     } else if (stage.isAfterAllRegions()) {
+      indent() << "return out\n";
       indentLevel--;
       llvm::outs() << "\n";
     }
@@ -65,10 +93,17 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
 
   void emitAlloc(memref::AllocOp op, const WalkStage &stage) {
     if (!stage.isBeforeAllRegions()) return;
+    auto memrefType = cast<MemRefType>(op.getResult().getType());
+    // SBUF temps (address space 2) are anonymous — their name is assigned
+    // later by emitElementwise when the result is computed.
+    bool isHBM = !memrefType.getMemorySpace() ||
+                 (isa<IntegerAttr>(memrefType.getMemorySpace()) &&
+                  cast<IntegerAttr>(memrefType.getMemorySpace()).getInt() == 0);
+    if (!isHBM) return;
+
     Value result = op.getResult();
     std::string name = "alloc_" + std::to_string(valueNames.size());
     valueNames[result] = name;
-    auto memrefType = cast<MemRefType>(op.getResult().getType());
     std::string shape = "(";
     for (unsigned i = 0; i < memrefType.getRank(); ++i) {
       if (i > 0) shape += ", ";
@@ -162,7 +197,14 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
       default: nlFunc = "nl.unknown"; break;
     }
     indent() << name << " = " << nlFunc << "(" << lhs << ", " << rhs << ")\n";
-    indent() << "nl.store(" << out << ", " << name << ")\n";
+    // Only store to HBM (address space 0); SBUF temps (address space 2) just
+    // chain to the next op via the symbol table.
+    auto outType = cast<MemRefType>(op.getOutput().getType());
+    bool isHBM = !outType.getMemorySpace() ||
+                 (isa<IntegerAttr>(outType.getMemorySpace()) &&
+                  cast<IntegerAttr>(outType.getMemorySpace()).getInt() == 0);
+    if (isHBM)
+      indent() << "nl.store(" << out << ", " << name << ")\n";
     valueNames[op.getOutput()] = name;
   }
 
