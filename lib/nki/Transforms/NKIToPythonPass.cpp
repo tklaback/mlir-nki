@@ -176,6 +176,43 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
     indent() << buf << idx << " = " << val << "\n";
   }
 
+  void emitModule(ModuleOp op, const WalkStage &stage) {
+    if (!stage.isAfterAllRegions()) return;
+    llvm::outs() << "if __name__ == \"__main__\":\n";
+    // Collect func names and arg shapes for the __main__ block.
+    op.walk([&](func::FuncOp func) {
+      auto args = func.getArguments();
+      // Emit numpy array creation for each input arg.
+      int inputIdx = 0;
+      for (Value arg : args) {
+        auto memrefType = dyn_cast<MemRefType>(arg.getType());
+        if (!memrefType) continue;
+        bool isOutput = !arg.use_empty() && llvm::all_of(arg.getUsers(), [&](Operation *user) {
+          auto store = dyn_cast<nki::StoreOp>(user);
+          return store && store.getDst() == arg;
+        });
+        if (isOutput) continue;
+        std::string shape = "(";
+        for (unsigned i = 0; i < memrefType.getRank(); ++i) {
+          if (i > 0) shape += ", ";
+          shape += std::to_string(memrefType.getDimSize(i));
+        }
+        shape += ")";
+        std::string dtype = "np." + mlirTypeToNKI(memrefType.getElementType());
+        llvm::outs() << "    a" << inputIdx << " = np.random.rand"
+                     << shape << ".astype(" << dtype << ")\n";
+        inputIdx++;
+      }
+      // Emit kernel call.
+      llvm::outs() << "    result = " << func.getName() << "[1, 1](";
+      for (int i = 0; i < inputIdx; ++i) {
+        if (i > 0) llvm::outs() << ", ";
+        llvm::outs() << "a" << i;
+      }
+      llvm::outs() << ")\n";
+    });
+  }
+
   void emitStore(nki::StoreOp op, const WalkStage &stage) {
     if (!stage.isBeforeAllRegions()) return;
     auto src = valueNames.lookup(op.getSrc());
@@ -214,7 +251,9 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
     llvm::outs() << "import numpy as np\n\n";
 
     getOperation()->walk([this](Operation *op, const WalkStage &stage) {
-      if (auto func = dyn_cast<func::FuncOp>(op))
+      if (auto mod = dyn_cast<ModuleOp>(op))
+        emitModule(mod, stage);
+      else if (auto func = dyn_cast<func::FuncOp>(op))
         emitFunc(func, stage);
       else if (auto konst = dyn_cast<arith::ConstantOp>(op))
         emitConstant(konst, stage);
