@@ -148,6 +148,24 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
     indent() << "nl.store(" << dst << ", " << src << ")\n";
   }
 
+  void emitElementwise(nki::ElementwiseOp op, const WalkStage &stage) {
+    if (!stage.isBeforeAllRegions()) return;
+    std::string name = "tmp_" + std::to_string(valueNames.size());
+    auto lhs = valueNames.lookup(op.getLhs());
+    auto rhs = valueNames.lookup(op.getRhs());
+    auto out = valueNames.lookup(op.getOutput());
+    std::string nlFunc;
+    switch (op.getKind()) {
+      case 0: nlFunc = "nl.multiply"; break;
+      case 1: nlFunc = "nl.add";      break;
+      case 2: nlFunc = "nl.subtract"; break;
+      default: nlFunc = "nl.unknown"; break;
+    }
+    indent() << name << " = " << nlFunc << "(" << lhs << ", " << rhs << ")\n";
+    indent() << "nl.store(" << out << ", " << name << ")\n";
+    valueNames[op.getOutput()] = name;
+  }
+
   void runOnOperation() override {
     llvm::outs() << "import neuronxcc.nki as nki\n";
     llvm::outs() << "import neuronxcc.nki.language as nl\n";
@@ -166,6 +184,8 @@ struct NKIToPythonPass : public impl::NKIToPythonPassBase<NKIToPythonPass> {
         emitLoad(load, stage);
       else if (auto store = dyn_cast<nki::StoreOp>(op))
         emitStore(store, stage);
+      else if (auto ew = dyn_cast<nki::ElementwiseOp>(op))
+        emitElementwise(ew, stage);
       else if (auto load = dyn_cast<memref::LoadOp>(op))
         emitMemRefLoad(load, stage);
       else if (auto store = dyn_cast<memref::StoreOp>(op))
