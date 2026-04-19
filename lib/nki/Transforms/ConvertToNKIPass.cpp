@@ -42,7 +42,6 @@ struct FuseLinearHerds : public OpRewritePattern<xilinx::air::SegmentOp> {
     // Verify all herds live inside this segment.
     for (auto herd : order)
       if (herd->getParentOfType<xilinx::air::SegmentOp>() != segment) {
-        llvm::errs() << "HERDS NOT IN THIS SEGMENT\n";
         return rewriter.notifyMatchFailure(segment, "herds not in this segment");
       }
 

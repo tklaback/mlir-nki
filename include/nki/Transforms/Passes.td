@@ -22,4 +22,17 @@ def ConvertAIRToNKIPass : Pass<"convert-air-to-nki", "mlir::ModuleOp"> {
   ];
 }
 
+def NKILiftLoopsToLinalgPass : Pass<"nki-lift-loops-to-linalg", "mlir::ModuleOp"> {
+  let summary = "Lift full-tile scf.for loop nests to linalg.generic";
+  let description = [{
+    Detects nested scf.for loops whose bounds cover the full memref shape
+    and whose bodies perform elementwise scalar operations, then reconstructs
+    them as linalg.generic ops with parallel iterators and identity indexing maps.
+  }];
+  let dependentDialects = [
+    "mlir::linalg::LinalgDialect",
+    "mlir::scf::SCFDialect"
+  ];
+}
+
 #endif // NKI_PASSES

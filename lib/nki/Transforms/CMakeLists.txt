@@ -1,6 +1,7 @@
 add_mlir_dialect_library(NKITransforms
   NKIToPythonPass.cpp
   ConvertToNKIPass.cpp
+  NKILiftLoopsToLinalgPass.cpp
 
   DEPENDS
   NKITransformsIncGen
@@ -11,6 +12,7 @@ add_mlir_dialect_library(NKITransforms
   MLIRArithDialect
   MLIRLinalgDialect
   MLIRMemRefDialect
+  MLIRSCFDialect
   MLIRAffineDialect
   MLIRIR
   MLIRPass
