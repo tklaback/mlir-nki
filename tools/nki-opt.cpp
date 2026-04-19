@@ -3,9 +3,11 @@
 #include "air/Dialect/AIR/AIRDialect.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Linalg/Passes.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Transforms/Passes.h"
 #include "nki/Transforms/Passes.h"
 #include "nki/IR/NKIOps.h"
 
@@ -23,6 +25,8 @@ int main(int argc, char **argv) {
   >();
 
   mlir::nki::registerNKIPasses();
+  mlir::registerLinalgPasses();
+  mlir::registerTransformsPasses();
 
   return mlir::asMainReturnCode(mlir::MlirOptMain(
       argc, argv, "NKI Optimizer", registry));
