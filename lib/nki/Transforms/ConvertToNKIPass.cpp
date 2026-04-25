@@ -45,10 +45,14 @@ namespace mlir::nki
 
         // Verify all herds live inside this segment.
         for (auto herd : order)
+        {
+          assert(herd->getParentOfType<SegmentOp>() == segment &&
+                 "Herd not contained in segment");
           if (herd->getParentOfType<xilinx::air::SegmentOp>() != segment)
           {
             return rewriter.notifyMatchFailure(segment, "herds not in this segment");
           }
+        }
 
         // For each consecutive pair, eliminate the connecting channel.
         // Collect sharedBufs here (before erasing puts) so we can re-insert
@@ -61,6 +65,10 @@ namespace mlir::nki
 
           xilinx::air::ChannelOp channel =
               analysis->getChannelBetween(producer, consumer);
+          assert(channel && "Missing channel between consecutive herds");
+          assert(!analysis.hasMultipleChannelsBetween(producer, consumer) &&
+                 "Expected exactly one channel per linear herd pair");
+          // Grammar rule: ∀ i: ∃ channel(h_i, h_{i+1}), and that the graph is linear with only one channel between them.
           if (!channel)
           {
             // llvm::errs() << "NO CHANNEL BETWEEN HERDS\n";
@@ -85,7 +93,9 @@ namespace mlir::nki
           if (!putOp || !getOp)
             return rewriter.notifyMatchFailure(
                 segment, "could not find put/get for herd-to-herd channel");
-
+          assert(putOp && "Missing channel.put in expected herd");
+          assert(getOp && "Missing channel.get in expected herd");
+          // Grammar rule: ∀i : put(hi) = srci ∧ get(hi+1) = dsti
           Value sharedBuf = putOp.getSrc();
           Value consumedBuf = getOp.getDst();
 
@@ -341,8 +351,17 @@ namespace mlir::nki
         for (Value kop : herd.getKernelOperands())
           argReplacements.push_back(kop);
 
+        assert(launchBody.getNumArguments() ==
+                   launch.getAsyncDependencies().size() +
+                       launch.getSizes().size() +
+                       launch.getLaunchOperands().size() &&
+               "Unexpected launch argument structure");
+        // Grammar rule: segment args = async_deps + sizes + launch_operands
+
         // Step 3: merge herd body into nki.launch body and erase the herd.
         rewriter.eraseOp(herdBody.getTerminator());
+        assert(argReplacements.size() == herdBody.getNumArguments() &&
+               "Mismatch in herd block arguments");
         rewriter.mergeBlocks(&herdBody, nkiBlock, argReplacements);
         rewriter.eraseOp(herd);
 
@@ -359,6 +378,8 @@ namespace mlir::nki
         for (Value operand : launch.getLaunchOperands())
           launchArgReplacements.push_back(operand);
         rewriter.eraseOp(launchBody.getTerminator());
+        assert(launchArgReplacements.size() == launchBody.getNumArguments() &&
+               "Mismatch in launch block arguments");
         rewriter.inlineBlockBefore(&launchBody, launch, launchArgReplacements);
         rewriter.eraseOp(launch);
 
@@ -375,6 +396,17 @@ namespace mlir::nki
     {
       auto &analysis = getAnalysis<ChannelDependencyAnalysis>();
       ChannelGraphType graphType = analysis.getGraphType();
+      // Grammar rule Γ ⊢ graph : LINEAR
+      assert(graphType == ChannelGraphType::LINEAR &&
+             "Only LINEAR channel graphs supported in this pass");
+      assert(graphType != ChannelGraphType::DAG &&
+             "DAG graphs not implemented");
+      assert(graphType != ChannelGraphType::CYCLIC &&
+             "Cyclic graphs not supported");
+      assert(graphType != ChannelGraphType::FANIN &&
+             "Fan-in graphs not supported");
+      assert(graphType != ChannelGraphType::FANOUT &&
+             "Fan-out graphs not supported");
       if (graphType == ChannelGraphType::LINEAR)
       {
         // Phase 1: fuse herds — erase herd-to-herd channels, merge bodies.
@@ -414,6 +446,25 @@ namespace mlir::nki
         // CYCLIC, FANOUT, FANIN: not yet implemented.
         signalPassFailure();
       }
+
+      bool hasSegment = false;
+      bool hasLaunch = false;
+      bool hasHerd = false;
+      bool hasChannel = false;
+
+      getOperation()->walk([&](xilinx::air::SegmentOp)
+                           { hasSegment = true; });
+      getOperation()->walk([&](xilinx::air::LaunchOp)
+                           { hasLaunch = true; });
+      getOperation()->walk([&](xilinx::air::HerdOp)
+                           { hasHerd = true; });
+      getOperation()->walk([&](xilinx::air::ChannelOp)
+                           { hasChannel = true; });
+
+      assert(!hasSegment && "All segments must be lowered");
+      assert(!hasLaunch && "All launches must be lowered");
+      assert(!hasHerd && "All herds must be lowered");
+      assert(!hasChannel && "All channels must be erased");
     }
   };
 

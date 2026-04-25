@@ -3,12 +3,15 @@
 using namespace mlir;
 using namespace mlir::nki;
 
-ChannelDependencyAnalysis::ChannelDependencyAnalysis(Operation *op) {
+ChannelDependencyAnalysis::ChannelDependencyAnalysis(Operation *op)
+{
   buildGraph(op);
 }
 
-void ChannelDependencyAnalysis::buildGraph(Operation *op) {
-  auto getOrCreateNode = [&](xilinx::air::HerdOp herd) -> Node * {
+void ChannelDependencyAnalysis::buildGraph(Operation *op)
+{
+  auto getOrCreateNode = [&](xilinx::air::HerdOp herd) -> Node *
+  {
     if (auto *existing = nodeMap.lookup(herd))
       return existing;
     auto node = std::make_unique<Node>();
@@ -21,8 +24,9 @@ void ChannelDependencyAnalysis::buildGraph(Operation *op) {
 
   // Steps 1-3: walk all herds; for each put inside a herd, find all other
   // herds that have a get on the same channel and add an edge.
-  op->walk([&](xilinx::air::HerdOp herdA) {
-    herdA.walk([&](xilinx::air::ChannelPutOp put) {
+  op->walk([&](xilinx::air::HerdOp herdA)
+           { herdA.walk([&](xilinx::air::ChannelPutOp put)
+                        {
       StringAttr chanName = put.getChanNameAttr().getAttr();
 
       op->walk([&](xilinx::air::HerdOp herdB) {
@@ -44,23 +48,24 @@ void ChannelDependencyAnalysis::buildGraph(Operation *op) {
           nodeA->neighbors.push_back({nodeB, channel});
           nodeB->inDegree++;
         });
-      });
-    });
-  });
+      }); }); });
 }
 
-bool ChannelDependencyAnalysis::isFuseable() {
+bool ChannelDependencyAnalysis::isFuseable()
+{
   auto type = getGraphType();
   return type == ChannelGraphType::LINEAR || type == ChannelGraphType::DAG;
 }
 
-ChannelGraphType ChannelDependencyAnalysis::getGraphType() {
+ChannelGraphType ChannelDependencyAnalysis::getGraphType()
+{
   // TODO: implement
   return ChannelGraphType::LINEAR;
 }
 
 SmallVector<xilinx::air::HerdOp>
-ChannelDependencyAnalysis::getTopologicalOrder() {
+ChannelDependencyAnalysis::getTopologicalOrder()
+{
   DenseMap<Node *, unsigned> inDeg;
   for (auto &n : nodes)
     inDeg[n.get()] = n->inDegree;
@@ -71,11 +76,13 @@ ChannelDependencyAnalysis::getTopologicalOrder() {
       queue.push_back(n.get());
 
   SmallVector<xilinx::air::HerdOp> result;
-  while (!queue.empty()) {
+  while (!queue.empty())
+  {
     Node *cur = queue.front();
     queue.erase(queue.begin());
     result.push_back(cur->herd);
-    for (auto [nbr, ch] : cur->neighbors) {
+    for (auto [nbr, ch] : cur->neighbors)
+    {
       assert(inDeg[nbr] > 0 && "ERROR, unreachable");
       if (--inDeg[nbr] == 0)
         queue.push_back(nbr);
@@ -85,11 +92,13 @@ ChannelDependencyAnalysis::getTopologicalOrder() {
 }
 
 SmallVector<xilinx::air::HerdOp>
-ChannelDependencyAnalysis::getProducers(xilinx::air::ChannelOp channel) {
+ChannelDependencyAnalysis::getProducers(xilinx::air::ChannelOp channel)
+{
   SmallVector<xilinx::air::HerdOp> result;
   for (auto &node : nodes)
     for (auto [nbr, ch] : node->neighbors)
-      if (ch == channel) {
+      if (ch == channel)
+      {
         result.push_back(node->herd);
         break;
       }
@@ -97,11 +106,13 @@ ChannelDependencyAnalysis::getProducers(xilinx::air::ChannelOp channel) {
 }
 
 SmallVector<xilinx::air::HerdOp>
-ChannelDependencyAnalysis::getConsumers(xilinx::air::ChannelOp channel) {
+ChannelDependencyAnalysis::getConsumers(xilinx::air::ChannelOp channel)
+{
   SmallVector<xilinx::air::HerdOp> result;
   for (auto &node : nodes)
     for (auto [nbr, ch] : node->neighbors)
-      if (ch == channel) {
+      if (ch == channel)
+      {
         result.push_back(nbr->herd);
         break;
       }
@@ -109,7 +120,8 @@ ChannelDependencyAnalysis::getConsumers(xilinx::air::ChannelOp channel) {
 }
 
 xilinx::air::ChannelOp ChannelDependencyAnalysis::getChannelBetween(
-    xilinx::air::HerdOp producer, xilinx::air::HerdOp consumer) {
+    xilinx::air::HerdOp producer, xilinx::air::HerdOp consumer)
+{
   Node *prodNode = nodeMap.lookup(producer);
   if (!prodNode)
     return {};
@@ -117,4 +129,22 @@ xilinx::air::ChannelOp ChannelDependencyAnalysis::getChannelBetween(
     if (nbr->herd == consumer)
       return ch;
   return {};
+}
+
+SmallVector<xilinx::air::ChannelOp> ChannelDependencyAnalysis::getChannelsBetween(
+    xilinx::air::HerdOp a, xilinx::air::HerdOp b)
+{
+  SmallVector<xilinx::air::ChannelOp> result;
+  Node *nodeA = nodeMap.lookup(a);
+  if (!nodeA)
+    return result;
+  for (auto [nbr, ch] : nodeA->neighbors)
+    if (nbr->herd == b)
+      result.push_back(ch);
+  return result;
+}
+bool ChannelDependencyAnalysis::hasMultipleChannelsBetween(
+    HerdOp a, HerdOp b)
+{
+  return getChannelsBetween(a, b).size() > 1;
 }
